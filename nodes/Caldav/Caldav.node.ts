@@ -24,8 +24,9 @@ type DavTransport = dav.transport.Basic | DigestTransport;
 interface DavRequest {
 	method?: string;
 	requestData?: string;
-	transformRequest?: (data: unknown) => unknown;
-	transformResponse?: (data: unknown) => unknown;
+	transformRequest?: (xhr: DigestRequest) => void;
+	transformResponse?: (data: DavResponse | string) => unknown;
+	onerror?: (error: unknown) => void;
 }
 
 interface DavResponse {
@@ -44,6 +45,18 @@ interface DigestChallenge {
 	algorithm?: string;
 }
 
+class DigestRequest {
+	private headers: Record<string, string> = {};
+
+	setRequestHeader(name: string, value: string): void {
+		this.headers[name] = value;
+	}
+
+	getHeaders(): Record<string, string> {
+		return this.headers;
+	}
+}
+
 class DigestTransport {
 	private nonceCount = 0;
 	private readonly username: string;
@@ -58,32 +71,45 @@ class DigestTransport {
 
 	async send(request: DavRequest, url: string, headers: Record<string, string> = {}): Promise<DavResponse> {
 		const requestUrl = this.resolveUrl(url);
-		const firstResponse = await this.request(request, requestUrl, headers);
+		const digestRequest = new DigestRequest();
+		if (request.transformRequest) request.transformRequest(digestRequest);
 
-		if (firstResponse.status !== 401) {
-			this.assertSuccess(firstResponse, requestUrl);
-			return firstResponse;
-		}
-
-		const authenticateHeader = firstResponse.xhr.getResponseHeader('www-authenticate');
-		if (!authenticateHeader.toLowerCase().startsWith('digest')) {
-			this.assertSuccess(firstResponse, requestUrl);
-		}
-
-		const challenge = this.parseDigestChallenge(authenticateHeader);
-		const authHeader = this.createDigestAuthorization(request.method || 'GET', requestUrl, challenge);
-		const secondResponse = await this.request(request, requestUrl, {
+		const requestHeaders = {
+			...digestRequest.getHeaders(),
 			...headers,
-			Authorization: authHeader,
-		});
+		};
 
-		this.assertSuccess(secondResponse, requestUrl);
-		return secondResponse;
+		try {
+			const firstResponse = await this.request(request, requestUrl, requestHeaders);
+
+			if (firstResponse.status !== 401) {
+				this.assertSuccess(firstResponse, requestUrl);
+				return this.transformResponse(request, firstResponse);
+			}
+
+			const authenticateHeader = firstResponse.xhr.getResponseHeader('www-authenticate');
+			if (!authenticateHeader.toLowerCase().startsWith('digest')) {
+				this.assertSuccess(firstResponse, requestUrl);
+			}
+
+			const challenge = this.parseDigestChallenge(authenticateHeader);
+			const authHeader = this.createDigestAuthorization(request.method || 'GET', requestUrl, challenge);
+			const secondResponse = await this.request(request, requestUrl, {
+				...requestHeaders,
+				Authorization: authHeader,
+			});
+
+			this.assertSuccess(secondResponse, requestUrl);
+			return this.transformResponse(request, secondResponse);
+		} catch (error) {
+			if (request.onerror) request.onerror(error);
+			throw error;
+		}
 	}
 
 	private async request(request: DavRequest, url: string, headers: Record<string, string>): Promise<DavResponse> {
 		const method = request.method || 'GET';
-		const body = request.transformRequest ? request.transformRequest(request.requestData || '') : request.requestData || '';
+		const body = request.requestData || '';
 		const bodyString = typeof body === 'string' ? body : String(body || '');
 		const parsedUrl = new URL(url);
 		const transport = parsedUrl.protocol === 'https:' ? https : http;
@@ -131,6 +157,10 @@ class DigestTransport {
 
 	private resolveUrl(url: string): string {
 		return new URL(url, this.serverUrl).toString();
+	}
+
+	private transformResponse(request: DavRequest, response: DavResponse): DavResponse {
+		return request.transformResponse ? request.transformResponse(response) as DavResponse : response;
 	}
 
 	private parseDigestChallenge(header: string): DigestChallenge {
