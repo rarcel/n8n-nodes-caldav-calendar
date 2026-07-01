@@ -1,6 +1,4 @@
 import {
-	IAuthenticateGeneric,
-	ICredentialTestRequest,
 	ICredentialType,
 	INodeProperties,
 } from 'n8n-workflow';
@@ -52,25 +50,4 @@ export class CaldavApi implements ICredentialType {
 		},
 	];
 
-	authenticate: IAuthenticateGeneric = {
-		type: 'generic',
-		properties: {
-			auth: {
-				username: '={{$credentials.username}}',
-				password: '={{$credentials.password}}',
-			},
-		},
-	};
-
-	test: ICredentialTestRequest = {
-		request: {
-			baseURL: '={{$credentials.serverUrl}}',
-			url: '',
-			method: 'GET',
-			headers: {
-				'Content-Type': 'application/xml; charset=utf-8',
-				'Depth': '0',
-			},
-		},
-	};
 } 

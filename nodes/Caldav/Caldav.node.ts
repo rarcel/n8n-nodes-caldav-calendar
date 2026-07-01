@@ -48,46 +48,57 @@ class DigestTransport {
 	private nonceCount = 0;
 	private readonly username: string;
 	private readonly password: string;
+	private readonly serverUrl: string;
 
 	constructor(credentials: ICredentialDataDecryptedObject) {
 		this.username = credentials.username as string;
 		this.password = credentials.password as string;
+		this.serverUrl = credentials.serverUrl as string;
 	}
 
 	async send(request: DavRequest, url: string, headers: Record<string, string> = {}): Promise<DavResponse> {
-		const firstResponse = await this.request(request, url, headers);
+		const requestUrl = this.resolveUrl(url);
+		const firstResponse = await this.request(request, requestUrl, headers);
 
 		if (firstResponse.status !== 401) {
-			this.assertSuccess(firstResponse, url);
+			this.assertSuccess(firstResponse, requestUrl);
 			return firstResponse;
 		}
 
 		const authenticateHeader = firstResponse.xhr.getResponseHeader('www-authenticate');
 		if (!authenticateHeader.toLowerCase().startsWith('digest')) {
-			this.assertSuccess(firstResponse, url);
+			this.assertSuccess(firstResponse, requestUrl);
 		}
 
 		const challenge = this.parseDigestChallenge(authenticateHeader);
-		const authHeader = this.createDigestAuthorization(request.method || 'GET', url, challenge);
-		const secondResponse = await this.request(request, url, {
+		const authHeader = this.createDigestAuthorization(request.method || 'GET', requestUrl, challenge);
+		const secondResponse = await this.request(request, requestUrl, {
 			...headers,
 			Authorization: authHeader,
 		});
 
-		this.assertSuccess(secondResponse, url);
+		this.assertSuccess(secondResponse, requestUrl);
 		return secondResponse;
 	}
 
 	private async request(request: DavRequest, url: string, headers: Record<string, string>): Promise<DavResponse> {
 		const method = request.method || 'GET';
 		const body = request.transformRequest ? request.transformRequest(request.requestData || '') : request.requestData || '';
+		const bodyString = typeof body === 'string' ? body : String(body || '');
 		const parsedUrl = new URL(url);
 		const transport = parsedUrl.protocol === 'https:' ? https : http;
+		const requestHeaders = {
+			...headers,
+		};
+
+		if (method !== 'GET' && method !== 'HEAD') {
+			requestHeaders['Content-Length'] = Buffer.byteLength(bodyString).toString();
+		}
 
 		return await new Promise((resolve, reject) => {
 			const req = transport.request(url, {
 				method,
-				headers,
+				headers: requestHeaders,
 			}, response => {
 				const chunks: Buffer[] = [];
 
@@ -110,12 +121,16 @@ class DigestTransport {
 
 			req.on('error', reject);
 
-			if (method !== 'GET' && method !== 'HEAD' && body) {
-				req.write(body as string);
+			if (method !== 'GET' && method !== 'HEAD' && bodyString) {
+				req.write(bodyString);
 			}
 
 			req.end();
 		});
+	}
+
+	private resolveUrl(url: string): string {
+		return new URL(url, this.serverUrl).toString();
 	}
 
 	private parseDigestChallenge(header: string): DigestChallenge {
