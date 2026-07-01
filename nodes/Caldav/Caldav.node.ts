@@ -257,7 +257,7 @@ const createDavTransport = (credentials: ICredentialDataDecryptedObject): DavTra
 };
 
 /**
- * Enum для частот повторения событий в RRULE
+ * Enum for RRULE recurrence frequencies
  */
 enum RecurrenceFrequency {
 	DAILY = 'DAILY',
@@ -267,7 +267,7 @@ enum RecurrenceFrequency {
 }
 
 /**
- * Структура объекта календаря DAV
+ * DAV calendar object structure
  */
 interface CalendarObject {
 	url: string;
@@ -290,8 +290,8 @@ interface Calendar {
  */
 interface CalendarEvent {
 	summary?: string;
-	start?: Date | string; // iCal может содержать строки дат
-	end?: Date | string;   // iCal может содержать строки дат
+	start?: Date | string; // iCal may contain date strings
+	end?: Date | string;   // iCal may contain date strings
 	description?: string;
 	location?: string;
 	uid?: string;
@@ -301,7 +301,7 @@ interface CalendarEvent {
 }
 
 /**
- * Структура парсинга iCal даты
+ * Parsed iCal date structure
  */
 interface ParsedICalDate {
 	date: Date;
@@ -520,10 +520,10 @@ export class Caldav implements INodeType {
 				try {
 					const credentials = await this.getCredentials('caldavApi');
 
-					// Создаем транспорт для аутентификации
+					// Create authentication transport
 					const xhr = createDavTransport(credentials);
 
-					// Создаем аккаунт CalDAV и загружаем календари
+					// Create CalDAV account and load calendars
 					const account = await dav.createAccount({
 						server: credentials.serverUrl as string,
 						xhr: xhr,
@@ -532,11 +532,11 @@ export class Caldav implements INodeType {
 						loadObjects: false,
 					});
 
-					// Преобразуем календари в опции для выпадающего списка
+					// Convert calendars to dropdown options
 					const calendarOptions: INodePropertyOptions[] = [];
 
 					for (const calendar of account.calendars) {
-						// Извлекаем относительный путь календаря (убираем serverUrl)
+						// Extract relative calendar path by removing serverUrl
 						const serverUrl = credentials.serverUrl as string;
 						let calendarPath = calendar.url;
 						
@@ -544,15 +544,15 @@ export class Caldav implements INodeType {
 							calendarPath = calendarPath.substring(serverUrl.length);
 						}
 						
-						// Если путь не начинается с /, добавляем его
+						// Add a leading slash if the path does not start with one
 						if (!calendarPath.startsWith('/')) {
 							calendarPath = '/' + calendarPath;
 						}
 
-						// Пытаемся получить красивое название календаря
+						// Try to get a readable calendar name
 						let calendarName = '';
 						
-						// Проверяем доступные свойства календаря для названия
+						// Check available calendar name properties
 						if ((calendar as CalendarObject).displayName) {
 							calendarName = (calendar as CalendarObject).displayName!;
 						} else if ((calendar as CalendarObject).name) {
@@ -560,11 +560,11 @@ export class Caldav implements INodeType {
 						} else if ((calendar as CalendarObject).description) {
 							calendarName = (calendar as CalendarObject).description!;
 						} else {
-							// Fallback: извлекаем название из URL (последняя часть пути)
+							// Fallback: extract the name from the last URL path segment
 							const pathParts = calendarPath.split('/').filter(part => part.length > 0);
 							calendarName = pathParts[pathParts.length - 1] || calendarPath;
 							
-							// Убираем trailing slash если есть
+							// Remove trailing slash if present
 							if (calendarName.endsWith('/')) {
 								calendarName = calendarName.slice(0, -1);
 							}
@@ -578,17 +578,17 @@ export class Caldav implements INodeType {
 							calendarType = 'Tasks';
 						}
 
-						// Формируем финальное название
+						// Build final display name
 						const displayName = calendarName ? `${calendarName} (${calendarType})` : `${calendarType} - ${calendarPath}`;
 
 						calendarOptions.push({
 							name: displayName,
 							value: calendarPath,
-							description: `Путь: ${calendarPath}${(calendar as CalendarObject).description ? ` | ${(calendar as CalendarObject).description}` : ''}`,
+							description: `Path: ${calendarPath}${(calendar as CalendarObject).description ? ` | ${(calendar as CalendarObject).description}` : ''}`,
 						});
 					}
 
-					// Сортируем календари по названию
+					// Sort calendars by name
 					calendarOptions.sort((a, b) => a.name.localeCompare(b.name));
 
 					return calendarOptions;
@@ -665,10 +665,10 @@ export class Caldav implements INodeType {
 			return ical;
 		};
 
-		// Функция для поиска события по имени файла (альтернативный метод)
+		// Find an event by filename as an alternative method
 		const findEventByFilename = async (calendarUrl: string, uid: string, xhr: DavTransport) => {
 			try {
-				// Создаем аккаунт CalDAV
+				// Create CalDAV account
 				const account = await dav.createAccount({
 					server: credentials.serverUrl as string,
 					xhr: xhr,
@@ -677,7 +677,7 @@ export class Caldav implements INodeType {
 					loadObjects: false,
 				});
 
-				// Находим нужный календарь
+				// Find the requested calendar
 				const fullCalendarUrl = `${credentials.serverUrl}${calendarUrl}`;
 				const calendar = account.calendars.find((cal: Calendar) => 
 					cal.url === fullCalendarUrl || cal.url.endsWith(calendarUrl)
@@ -687,14 +687,14 @@ export class Caldav implements INodeType {
 					return null;
 				}
 
-				// Формируем ожидаемый URL события
+				// Build expected event URL
 				let expectedEventUrl = calendar.url;
 				if (!expectedEventUrl.endsWith('/')) {
 					expectedEventUrl += '/';
 				}
 				expectedEventUrl += `${uid}.ics`;
 
-				// Пытаемся загрузить событие напрямую по URL
+				// Try to load the event directly by URL
 				try {
 					const directRequest = {
 						method: 'GET',
@@ -713,7 +713,7 @@ export class Caldav implements INodeType {
 						};
 					}
 				} catch (directError) {
-					// Если прямой запрос не работает, возвращаем null
+					// Return null if the direct request fails
 					return null;
 				}
 
@@ -723,10 +723,10 @@ export class Caldav implements INodeType {
 			}
 		};
 
-		// Функция для поиска события по UID в календаре
+		// Find an event by UID in a calendar
 		const findEventByUID = async (calendarUrl: string, uid: string, xhr: DavTransport) => {
 			try {
-				// Создаем аккаунт CalDAV
+				// Create CalDAV account
 				const account = await dav.createAccount({
 					server: credentials.serverUrl as string,
 					xhr: xhr,
@@ -735,7 +735,7 @@ export class Caldav implements INodeType {
 					loadObjects: false,
 				});
 
-				// Находим нужный календарь
+				// Find the requested calendar
 				const fullCalendarUrl = `${credentials.serverUrl}${calendarUrl}`;
 				const calendar = account.calendars.find((cal: Calendar) => 
 					cal.url === fullCalendarUrl || cal.url.endsWith(calendarUrl)
@@ -745,7 +745,7 @@ export class Caldav implements INodeType {
 					return null;
 				}
 
-				// Синхронизируем календарь и получаем события
+				// Sync the calendar and get events
 				const syncedCalendar = await dav.syncCalendar(calendar, {
 					xhr: xhr,
 					syncMethod: 'basic',
@@ -771,7 +771,7 @@ export class Caldav implements INodeType {
 					}
 				}
 
-				// Ищем событие по UID
+				// Search for the event by UID
 				for (const obj of calendarObjects) {
 					if (!obj.calendarData) continue;
 					
@@ -779,10 +779,10 @@ export class Caldav implements INodeType {
 					const uidMatch = calendarData.match(/UID:([^\r\n]+)/);
 					
 					if (uidMatch && uidMatch[1].trim() === uid) {
-						// Проверяем и исправляем URL события если необходимо
+						// Check and fix the event URL if needed
 						let eventUrl = obj.url;
 						
-						// Если URL не содержит .ics, добавляем UID как имя файла
+						// Append the UID as filename if the URL does not contain .ics
 						if (!eventUrl.endsWith('.ics')) {
 							if (!eventUrl.endsWith('/')) {
 								eventUrl += '/';
@@ -790,7 +790,7 @@ export class Caldav implements INodeType {
 							eventUrl += `${uid}.ics`;
 						}
 						
-						// Возвращаем объект с исправленным URL
+						// Return the object with the fixed URL
 						return {
 							...obj,
 							url: eventUrl
@@ -804,7 +804,7 @@ export class Caldav implements INodeType {
 			}
 		};
 
-		// Улучшенная функция для парсинга iCal дат с поддержкой таймзон
+		// Improved iCal date parsing with timezone support
 		const parseICalDate = (dateStr: string, eventData: string): ParsedICalDate | null => {
 			try {
 				const cleanDateStr = dateStr.trim();
@@ -812,15 +812,15 @@ export class Caldav implements INodeType {
 				let timezone: string | undefined;
 				let isUtc = false;
 
-				// Поиск VTIMEZONE в eventData для определения таймзоны
+				// Look for VTIMEZONE in eventData to determine timezone
 				const timezoneMatch = eventData.match(/DTSTART;TZID=([^:]+):/);
 				if (timezoneMatch) {
 					timezone = timezoneMatch[1];
 				}
 
-				// Парсинг различных форматов дат
+				// Parse different date formats
 				if (cleanDateStr.endsWith('Z')) {
-					// UTC формат: 20231025T120000Z
+					// UTC format: 20231025T120000Z
 					isUtc = true;
 					const year = parseInt(cleanDateStr.substring(0, 4));
 					const month = parseInt(cleanDateStr.substring(4, 6)) - 1;
@@ -835,7 +835,7 @@ export class Caldav implements INodeType {
 						date = new Date(Date.UTC(year, month, day));
 					}
 				} else if (cleanDateStr.includes('T')) {
-					// Формат с временем: YYYYMMDDTHHMMSS
+					// Format with time: YYYYMMDDTHHMMSS
 					const year = parseInt(cleanDateStr.substring(0, 4));
 					const month = parseInt(cleanDateStr.substring(4, 6)) - 1;
 					const day = parseInt(cleanDateStr.substring(6, 8));
@@ -844,17 +844,17 @@ export class Caldav implements INodeType {
 					const second = parseInt(cleanDateStr.substring(13, 15));
 					
 					if (timezone) {
-						// Если есть таймзона, создаем дату как локальную, но помечаем таймзону
+						// If timezone exists, create a local date and keep the timezone marker
 						date = new Date(year, month, day, hour, minute, second);
 					} else {
-						// Локальное время
+						// Local time
 						date = new Date(year, month, day, hour, minute, second);
 					}
 				} else if (cleanDateStr.includes('-')) {
-					// Формат YYYY-MM-DD
+					// YYYY-MM-DD format
 					date = new Date(cleanDateStr);
 				} else if (cleanDateStr.length === 8) {
-					// Формат YYYYMMDD (только дата)
+					// YYYYMMDD format (date only)
 					const year = parseInt(cleanDateStr.substring(0, 4));
 					const month = parseInt(cleanDateStr.substring(4, 6)) - 1;
 					const day = parseInt(cleanDateStr.substring(6, 8));
@@ -874,20 +874,20 @@ export class Caldav implements INodeType {
 			}
 		};
 
-		// Функция для конвертации в ISO формат с учетом таймзоны
+		// Convert to ISO format with timezone information
 		const toISOWithTimezone = (parsedDate: ParsedICalDate): string => {
 			if (parsedDate.isUtc) {
 				return parsedDate.date.toISOString();
 			} else if (parsedDate.timezone) {
-				// Если есть таймзона, добавляем информацию о ней
+				// Add timezone information when present
 				return parsedDate.date.toISOString() + ` (${parsedDate.timezone})`;
 			} else {
-				// Локальное время
+				// Local time
 				return parsedDate.date.toISOString();
 			}
 		};
 
-		// Функция для форматирования даты в iCal формат (YYYYMMDDTHHMMSS)
+		// Format a date as iCal YYYYMMDDTHHMMSS
 		const formatDateToICal = (date: Date, isUtc: boolean = false): string => {
 			const year = date.getFullYear();
 			const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -900,7 +900,7 @@ export class Caldav implements INodeType {
 			return isUtc ? dateStr + 'Z' : dateStr;
 		};
 
-		// Функция для проверки исключенных дат (EXDATE)
+		// Check excluded dates (EXDATE)
 		const isDateExcluded = (targetDate: Date, eventData: string): boolean => {
 			const exdateMatches = eventData.match(/EXDATE[^:]*:([^\r\n]+)/g);
 			if (!exdateMatches) return false;
@@ -911,7 +911,7 @@ export class Caldav implements INodeType {
 					const exDateStr = dateMatch[1].trim();
 					const parsedExDate = parseICalDate(exDateStr, eventData);
 					if (parsedExDate) {
-						// Сравниваем только дату, игнорируя время
+						// Compare only the date and ignore time
 						const exDate = parsedExDate.date;
 						if (exDate.getFullYear() === targetDate.getFullYear() &&
 							exDate.getMonth() === targetDate.getMonth() &&
@@ -924,9 +924,9 @@ export class Caldav implements INodeType {
 			return false;
 		};
 
-		// Функция для расчета актуальных дат повторяющегося события для конкретной целевой даты
+		// Calculate actual dates for a recurring event on a target date
 		const calculateRecurringEventDates = (eventStartDate: Date, eventEndDate: Date | null, targetDate: Date): { actualStartDate: Date, actualEndDate: Date | null } => {
-			// Сохраняем время из оригинального события
+			// Keep the time from the original event
 			const startTime = {
 				hours: eventStartDate.getHours(),
 				minutes: eventStartDate.getMinutes(),
@@ -934,35 +934,35 @@ export class Caldav implements INodeType {
 				milliseconds: eventStartDate.getMilliseconds()
 			};
 
-			// Создаем актуальную дату начала на целевую дату с оригинальным временем
+			// Create the actual start date on the target date with the original time
 			const actualStartDate = new Date(targetDate);
 			actualStartDate.setHours(startTime.hours, startTime.minutes, startTime.seconds, startTime.milliseconds);
 
 			let actualEndDate: Date | null = null;
 			if (eventEndDate) {
-				// Рассчитываем продолжительность оригинального события
+				// Calculate original event duration
 				const originalDuration = eventEndDate.getTime() - eventStartDate.getTime();
 				
-				// Создаем актуальную дату окончания
+				// Create the actual end date
 				actualEndDate = new Date(actualStartDate.getTime() + originalDuration);
 			}
 
 			return { actualStartDate, actualEndDate };
 		};
 
-		// Улучшенная функция для проверки повторяющихся событий
+		// Improved recurring event matching
 		const isRecurringEventOnDate = (eventStartDate: Date, targetDate: Date, rrule: string, eventData: string): boolean => {
-			// Если событие началось после целевой даты, оно не может повториться в прошлом
+			// If the event starts after the target date, it cannot recur in the past
 			if (eventStartDate > targetDate) {
 				return false;
 			}
 
-			// Проверяем исключенные даты (EXDATE)
+			// Check excluded dates (EXDATE)
 			if (isDateExcluded(targetDate, eventData)) {
 				return false;
 			}
 
-			// Парсим правило повторения
+			// Parse recurrence rule
 			const rruleParts = rrule.split(';');
 			const rules: Record<string, string> = {};
 			
@@ -976,7 +976,7 @@ export class Caldav implements INodeType {
 			const freq = rules['FREQ'];
 			if (!freq) return false;
 
-			// Проверяем окончание повторения
+			// Check recurrence end
 			if (rules['UNTIL']) {
 				const untilDate = parseICalDate(rules['UNTIL'], '');
 				if (untilDate && targetDate > untilDate.date) {
@@ -984,12 +984,12 @@ export class Caldav implements INodeType {
 				}
 			}
 
-			// Проверяем количество повторений
+			// Check recurrence count
 			if (rules['COUNT']) {
 				const count = parseInt(rules['COUNT']);
 				const interval = parseInt(rules['INTERVAL'] || '1');
 				
-				// Рассчитываем количество прошедших интервалов
+				// Calculate elapsed intervals
 				const diffTime = targetDate.getTime() - eventStartDate.getTime();
 				const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 				
@@ -1002,7 +1002,7 @@ export class Caldav implements INodeType {
 						intervalsPassed = Math.floor(diffDays / (7 * interval));
 						break;
 					case RecurrenceFrequency.MONTHLY:
-						// Приблизительный расчет для месяцев
+						// Approximate month calculation
 						intervalsPassed = Math.floor(diffDays / (30 * interval));
 						break;
 					case RecurrenceFrequency.YEARLY:
@@ -1015,7 +1015,7 @@ export class Caldav implements INodeType {
 				}
 			}
 
-			// Рассчитываем соответствие дат для каждой частоты
+			// Calculate date matching for each frequency
 			const interval = parseInt(rules['INTERVAL'] || '1');
 
 			switch (freq) {
@@ -1025,7 +1025,7 @@ export class Caldav implements INodeType {
 				}
 
 				case RecurrenceFrequency.WEEKLY: {
-					// Проверяем дни недели (BYDAY) - ОБЯЗАТЕЛЬНО для недельных событий
+					// Check week days (BYDAY), required for weekly events
 					if (rules['BYDAY']) {
 						const allowedDays = rules['BYDAY'].split(',');
 						const targetDayOfWeek = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][targetDate.getDay()];
@@ -1033,48 +1033,48 @@ export class Caldav implements INodeType {
 							return false;
 						}
 					} else {
-						// Если BYDAY не указан, проверяем тот же день недели что и исходное событие
+						// If BYDAY is not set, check the same weekday as the original event
 						if (targetDate.getDay() !== eventStartDate.getDay()) {
 							return false;
 						}
 					}
 					
-					// Вычисляем количество недель между исходным событием и целевой датой
+					// Calculate the number of weeks between the original event and target date
 					const msPerDay = 24 * 60 * 60 * 1000;
 					const msPerWeek = 7 * msPerDay;
 					
-					// Находим начало недели для исходного события (понедельник)
+					// Find the week start for the original event (Monday)
 					const eventWeekStart = new Date(eventStartDate);
 					eventWeekStart.setDate(eventStartDate.getDate() - ((eventStartDate.getDay() + 6) % 7));
 					eventWeekStart.setHours(0, 0, 0, 0);
 					
-					// Находим начало недели для целевой даты
+					// Find the week start for the target date
 					const targetWeekStart = new Date(targetDate);
 					targetWeekStart.setDate(targetDate.getDate() - ((targetDate.getDay() + 6) % 7));
 					targetWeekStart.setHours(0, 0, 0, 0);
 					
-					// Вычисляем разность в неделях
+					// Calculate the week difference
 					const weeksDiff = Math.floor((targetWeekStart.getTime() - eventWeekStart.getTime()) / msPerWeek);
 					
-					// Проверяем соответствие интервалу
+					// Check interval match
 					return weeksDiff >= 0 && weeksDiff % interval === 0;
 				}
 
 				case RecurrenceFrequency.MONTHLY: {
-					// Проверяем конкретный день месяца (BYMONTHDAY)
+					// Check specific day of month (BYMONTHDAY)
 					if (rules['BYMONTHDAY']) {
 						const monthDay = parseInt(rules['BYMONTHDAY']);
 						if (targetDate.getDate() !== monthDay) {
 							return false;
 						}
 					} else {
-						// Базовая проверка - тот же день месяца, что и в оригинальном событии
+						// Basic check: same day of month as the original event
 						if (targetDate.getDate() !== eventStartDate.getDate()) {
 							return false;
 						}
 					}
 					
-					// Проверяем месячный интервал
+					// Check monthly interval
 					const monthsDiff = (targetDate.getFullYear() - eventStartDate.getFullYear()) * 12 
 						+ (targetDate.getMonth() - eventStartDate.getMonth());
 					
@@ -1082,7 +1082,7 @@ export class Caldav implements INodeType {
 				}
 
 				case RecurrenceFrequency.YEARLY: {
-					// Проверяем, что это тот же день и месяц
+					// Check that day and month match
 					if (targetDate.getDate() !== eventStartDate.getDate() || 
 						targetDate.getMonth() !== eventStartDate.getMonth()) {
 						return false;
@@ -1097,9 +1097,9 @@ export class Caldav implements INodeType {
 			}
 		};
 
-		// Функция для создания оптимизированного xhr транспорта
+		// Create optimized XHR transport
 		const createOptimizedXhr = (credentials: ICredentialDataDecryptedObject): DavTransport => {
-			// Предупреждаем о проблемах с Yandex CalDAV
+			// Warn about Yandex CalDAV issues
 			const serverUrl = credentials.serverUrl as string;
 			if (serverUrl.includes('yandex.ru')) {
 				this.logger?.warn(`[CalDAV WARNING] Connecting to Yandex CalDAV: Known to have artificial 60s/MB delays for WebDAV operations. Updates may timeout frequently.`);
@@ -1108,15 +1108,15 @@ export class Caldav implements INodeType {
 
 			const xhr = createDavTransport(credentials);
 
-			// Добавляем кастомный обработчик для оптимизации заголовков
+			// Add a custom handler to optimize headers
 			const originalSend = xhr.send.bind(xhr);
 			xhr.send = async function(request: DavRequest, url: string, headers: Record<string, string> = {}) {
-				// Добавляем стандартные заголовки для лучшей совместимости с Yandex
+				// Add standard headers for better Yandex compatibility
 				const optimizedHeaders = {
 					'User-Agent': 'n8n-caldav-node/1.0',
 					'Accept': 'text/calendar, application/calendar+xml, text/plain',
-					'Accept-Encoding': 'identity', // Отключаем сжатие для стабильности
-					'Connection': 'close', // Избегаем keep-alive проблем
+					'Accept-Encoding': 'identity', // Disable compression for stability
+					'Connection': 'close', // Avoid keep-alive issues
 					...headers
 				};
 
@@ -1126,7 +1126,7 @@ export class Caldav implements INodeType {
 			return xhr;
 		};
 
-		// Функция для улучшенной обработки ошибок CalDAV
+		// Improved CalDAV error handling
 		const handleCalDAVError = (error: Error & { status?: number }, operation: string, url: string, duration: number): string => {
 			let errorMessage = `Failed to ${operation.toLowerCase()} event at ${url}`;
 			
@@ -1153,7 +1153,7 @@ export class Caldav implements INodeType {
 			
 			errorMessage += `. Request duration: ${duration}ms`;
 			
-			// Специальная обработка для Yandex CalDAV
+			// Special handling for Yandex CalDAV
 			if (url.includes('yandex.ru')) {
 				if (error.status === 504 || duration > 3000) {
 					errorMessage += '\n\n⚠️  YANDEX CALDAV LIMITATION DETECTED:\n';
@@ -1183,11 +1183,11 @@ export class Caldav implements INodeType {
 
 					this.logger?.info(`[CalDAV CREATE] Starting creation of event: ${eventTitle}`);
 
-					// Создаем оптимизированный транспорт для аутентификации
+					// Create optimized authentication transport
 					const xhr = createOptimizedXhr(credentials);
 
 					try {
-						// Генерируем iCal данные для события
+						// Generate iCal data for the event
 						const uid = generateEventUID();
 						const icalData = generateICalEvent({
 							uid,
@@ -1200,7 +1200,7 @@ export class Caldav implements INodeType {
 						
 						this.logger?.info(`[CalDAV CREATE] Generated event UID: ${uid}, iCal length: ${icalData.length} chars`);
 
-						// Создаем аккаунт CalDAV
+						// Create CalDAV account
 						const account = await dav.createAccount({
 							server: credentials.serverUrl as string,
 							xhr: xhr,
@@ -1209,7 +1209,7 @@ export class Caldav implements INodeType {
 							loadObjects: false,
 						});
 
-						// Находим нужный календарь
+						// Find the requested calendar
 						const fullCalendarUrl = `${credentials.serverUrl}${calendarUrl}`;
 						const calendar = account.calendars.find((cal: Calendar) => 
 							cal.url === fullCalendarUrl || cal.url.endsWith(calendarUrl)
@@ -1225,7 +1225,7 @@ export class Caldav implements INodeType {
 
 						this.logger?.info(`[CalDAV CREATE] Calendar found: ${calendar.url}`);
 
-						// Проверяем доступность календаря через синхронизацию
+						// Check calendar accessibility by syncing
 						try {
 							await dav.syncCalendar(calendar, {
 								xhr: xhr,
@@ -1240,7 +1240,7 @@ export class Caldav implements INodeType {
 							);
 						}
 
-						// Создаем событие в календаре
+						// Create event in calendar
 						let eventUrl = calendar.url;
 						if (!eventUrl.endsWith('/')) {
 							eventUrl += '/';
@@ -1249,7 +1249,7 @@ export class Caldav implements INodeType {
 						
 						this.logger?.info(`[CalDAV CREATE] Making PUT request to: ${eventUrl}`);
 						
-						// Создаем объект события для CalDAV используя встроенный xhr транспорт
+						// Create the CalDAV event object using the built-in XHR transport
 						const request = {
 							method: 'PUT',
 							requestData: icalData,
@@ -1261,7 +1261,7 @@ export class Caldav implements INodeType {
 						const requestStartTime = Date.now();
 						
 						try {
-							// Используем xhr.send с правильными параметрами
+							// Use xhr.send with correct parameters
 							const response = await xhr.send(request, eventUrl, {
 								'Content-Type': 'text/calendar; charset=utf-8',
 							});
@@ -1279,23 +1279,23 @@ export class Caldav implements INodeType {
 							const status = (httpError as { status?: number }).status || 'No status';
 							this.logger?.error(`[CalDAV CREATE] PUT request failed after ${requestDuration}ms, status: ${status}`);
 							
-							// Альтернативный подход - попробуем создать временный файл и синхронизировать
+							// Alternative approach: create a temporary object and sync
 							try {
 								this.logger?.info(`[CalDAV CREATE] Trying alternative sync method...`);
-								// Создаем временный объект календаря
+								// Create temporary calendar object
 								const tempCalendarObject = {
 									url: eventUrl,
 									etag: '',
 									calendarData: icalData,
 								};
 								
-								// Добавляем объект в календарь вручную и синхронизируем
+								// Add object to the calendar manually and sync
 								if (!calendar.objects) {
 									calendar.objects = [];
 								}
 								calendar.objects.push(tempCalendarObject);
 								
-								// Пытаемся синхронизировать календарь с новым объектом
+								// Try to sync the calendar with the new object
 								await dav.syncCalendar(calendar, {
 									xhr: xhr,
 									syncMethod: 'basic',
@@ -1308,7 +1308,7 @@ export class Caldav implements INodeType {
 								};
 								
 							} catch (syncError) {
-								// Если и альтернативный метод не работает, выдаем подробную ошибку
+								// If the alternative method also fails, return a detailed error
 								const httpErr = httpError as { status?: number; message?: string };
 								const syncErr = syncError as { message?: string };
 								let errorMessage = `Failed to create event at ${eventUrl}`;
@@ -1373,16 +1373,16 @@ export class Caldav implements INodeType {
 
 					this.logger?.info(`[CalDAV DELETE] Starting deletion of event UID: ${eventUID}`);
 
-					// Создаем оптимизированный транспорт для аутентификации
+					// Create optimized authentication transport
 					const xhr = createOptimizedXhr(credentials);
 
 					try {
-						// Находим существующее событие
+						// Find existing event
 						let existingEvent = await findEventByUID(calendarUrl, eventUID, xhr);
 						
 						this.logger?.info(`[CalDAV DELETE] findEventByUID result: ${existingEvent ? 'Found' : 'Not found'}`);
 						
-						// Если не найдено через синхронизацию, пробуем прямой запрос
+						// If not found through sync, try a direct request
 						if (!existingEvent) {
 							this.logger?.info(`[CalDAV DELETE] Trying findEventByFilename as fallback...`);
 							existingEvent = await findEventByFilename(calendarUrl, eventUID, xhr);
@@ -1399,7 +1399,7 @@ export class Caldav implements INodeType {
 
 						this.logger?.info(`[CalDAV DELETE] Event found at URL: ${existingEvent.url}`);
 
-						// Удаляем событие используя xhr транспорт
+						// Delete event using XHR transport
 						const deleteRequest = {
 							method: 'DELETE',
 							requestData: '',
@@ -1441,7 +1441,7 @@ export class Caldav implements INodeType {
 							const status = (httpError as { status?: number }).status || 'No status';
 							this.logger?.error(`[CalDAV DELETE] DELETE request failed after ${requestDuration}ms, status: ${status}`);
 							
-							// Используем улучшенную обработку ошибок
+							// Use improved error handling
 							const errorMessage = handleCalDAVError(httpError as Error & { status?: number }, 'DELETE', existingEvent.url, requestDuration);
 							
 							throw new NodeOperationError(
@@ -1473,11 +1473,11 @@ export class Caldav implements INodeType {
 
 					this.logger?.info(`[CalDAV GET] Getting events for date: ${date} from calendar: ${calendarUrl}`);
 
-					// Создаем оптимизированный транспорт для аутентификации
+					// Create optimized authentication transport
 					const xhr = createOptimizedXhr(credentials);
 
 					try {
-						// Создаем аккаунт CalDAV
+						// Create CalDAV account
 						const account = await dav.createAccount({
 							server: credentials.serverUrl as string,
 							xhr: xhr,
@@ -1486,7 +1486,7 @@ export class Caldav implements INodeType {
 							loadObjects: false,
 						});
 
-						// Находим нужный календарь по URL
+						// Find the requested calendar by URL
 						const fullCalendarUrl = `${credentials.serverUrl}${calendarUrl}`;
 						
 						const calendar = account.calendars.find((cal: Calendar) => 
@@ -1577,7 +1577,7 @@ export class Caldav implements INodeType {
 							
 							const calendarData = obj.calendarData;
 							
-							// Извлекаем все блоки VEVENT
+							// Extract all VEVENT blocks
 							const veventBlocks = calendarData.split('BEGIN:VEVENT').slice(1);
 							
 							for (const veventBlock of veventBlocks) {
@@ -1585,11 +1585,11 @@ export class Caldav implements INodeType {
 								
 								const eventData = 'BEGIN:VEVENT' + veventBlock.split('END:VEVENT')[0] + 'END:VEVENT';
 								
-								// Ищем DTSTART в конкретном событии
+								// Look for DTSTART in this event
 								const eventDateMatches = [
-									eventData.match(/DTSTART[^:]*:(\d{8}T\d{6}Z?)/), // Формат YYYYMMDDTHHMMSSZ
-									eventData.match(/DTSTART[^:]*:(\d{8})/), // Формат YYYYMMDD
-									eventData.match(/DTSTART[^:]*:(\d{4}-\d{2}-\d{2})/), // Формат YYYY-MM-DD
+									eventData.match(/DTSTART[^:]*:(\d{8}T\d{6}Z?)/), // YYYYMMDDTHHMMSSZ format
+									eventData.match(/DTSTART[^:]*:(\d{8})/), // YYYYMMDD format
+									eventData.match(/DTSTART[^:]*:(\d{4}-\d{2}-\d{2})/), // YYYY-MM-DD format
 								];
 								
 								for (const match of eventDateMatches) {
@@ -1602,7 +1602,7 @@ export class Caldav implements INodeType {
 									
 									const eventDate = parsedDate.date;
 									
-									// Проверяем прямое совпадение даты
+									// Check direct date match
 									if (eventDate.toDateString() === targetDate.toDateString()) {
 										eventsForDate.push({
 											...obj,
@@ -1611,26 +1611,26 @@ export class Caldav implements INodeType {
 										break;
 									}
 									
-									// Проверяем правила повторения (RRULE)
+									// Check recurrence rules (RRULE)
 									const rruleMatch = eventData.match(/RRULE:([^\r\n]+)/);
 									if (rruleMatch && isRecurringEventOnDate(eventDate, targetDate, rruleMatch[1], eventData)) {
-										// Для повторяющихся событий рассчитываем актуальные даты
-										// Парсим также DTEND для расчета продолжительности
+										// Calculate actual dates for recurring events
+										// Also parse DTEND to calculate duration
 										const dtEndMatch = eventData.match(/DTEND[^:]*:(.+)/);
 										const dtEndStr = dtEndMatch ? dtEndMatch[1].trim() : '';
 										const parsedEndDate = dtEndStr ? parseICalDate(dtEndStr, eventData) : null;
 										
-										// Рассчитываем актуальные даты для целевой даты
+										// Calculate actual dates for the target date
 										const { actualStartDate, actualEndDate } = calculateRecurringEventDates(
 											eventDate, 
 											parsedEndDate?.date || null, 
 											targetDate
 										);
 										
-										// Создаем модифицированные данные события с актуальными датами
+										// Create modified event data with actual dates
 										let modifiedEventData = eventData;
 										
-										// Заменяем DTSTART на актуальную дату
+										// Replace DTSTART with the actual date
 										const originalDtStart = eventData.match(/DTSTART[^:]*:([^\r\n]+)/);
 										if (originalDtStart) {
 											const isUtcStart = parsedDate.isUtc;
@@ -1640,7 +1640,7 @@ export class Caldav implements INodeType {
 											modifiedEventData = modifiedEventData.replace(startLine, newStartLine);
 										}
 										
-										// Заменяем DTEND на актуальную дату (если существует)
+										// Replace DTEND with the actual date if present
 										if (actualEndDate && dtEndMatch) {
 											const isUtcEnd = parsedEndDate?.isUtc || false;
 											const actualEndStr = formatDateToICal(actualEndDate, isUtcEnd);
@@ -1665,12 +1665,12 @@ export class Caldav implements INodeType {
 						for (const event of eventsForDate) {
 							const eventData = event.calendarData;
 							
-							// Проверяем, что eventData существует
+							// Check that eventData exists
 							if (!eventData) {
 								continue;
 							}
 							
-							// Извлекаем основную информацию о событии
+							// Extract main event information
 							const summaryMatch = eventData.match(/SUMMARY:(.+)/);
 							const descriptionMatch = eventData.match(/DESCRIPTION:(.+)/);
 							const dtStartMatch = eventData.match(/DTSTART[^:]*:(.+)/);
@@ -1679,7 +1679,7 @@ export class Caldav implements INodeType {
 							const locationMatch = eventData.match(/LOCATION:(.+)/);
 							const webUrlMatch = eventData.match(/URL:(.+)/);
 
-							// Парсим даты для ISO формата
+							// Parse dates for ISO output
 							const dtStartRaw = dtStartMatch ? dtStartMatch[1].trim() : '';
 							const dtEndRaw = dtEndMatch ? dtEndMatch[1].trim() : '';
 							

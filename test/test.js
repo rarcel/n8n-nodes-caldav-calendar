@@ -1,57 +1,57 @@
 const assert = require('assert');
 
-// Тестовые данные для проверки CalDAV Node функциональности
+// Test data for CalDAV node functionality
 describe('CalDAV Node Tests', function() {
     
-    // Тестируем структуру параметров узла
+    // Test node parameter structure
     describe('Node Configuration', function() {
         it('should have correct node structure', function() {
-            // Проверяем что узел имеет правильную структуру
+            // Check that the node has the correct structure
             console.log('✓ Node structure validation ready');
             assert.ok(true, 'Node structure test passed');
         });
         
         it('should support calendar selection via loadOptions', function() {
-            // Тест проверяет что loadOptionsMethod правильно настроен
+            // Test that loadOptionsMethod is configured correctly
             console.log('✓ LoadOptions method configuration validated');
             assert.ok(true, 'LoadOptions configuration test passed');
         });
     });
     
-    // Тестируем обработку календарей
+    // Test calendar handling
     describe('Calendar Handling', function() {
         it('should format calendar names with display names', function() {
-            // Тест проверяет правильность формирования названий календарей
-            // Формат: "Название (Тип)" с описанием
+            // Test correct calendar name formatting
+            // Format: "Name (Type)" with description
             console.log('✓ Calendar name formatting test structure ready');
             assert.ok(true, 'Calendar formatting test passed');
         });
         
         it('should detect calendar types correctly', function() {
-            // Тест проверяет определение типов календарей:
-            // - События (events, VEVENT)
-            // - Задачи (todos, tasks, VTODO)
-            // - Календарь (общий тип)
+            // Test calendar type detection:
+            // - Events (events, VEVENT)
+            // - Tasks (todos, tasks, VTODO)
+            // - Calendar (generic type)
             console.log('✓ Calendar type detection test structure ready');
             assert.ok(true, 'Calendar type detection test passed');
         });
         
         it('should generate correct calendar paths', function() {
-            // Проверяем что пути календарей формируются правильно
-            // Относительные пути без serverUrl
+            // Check that calendar paths are generated correctly
+            // Relative paths without serverUrl
             console.log('✓ Calendar path generation test structure ready');
             assert.ok(true, 'Calendar path generation test passed');
         });
     });
     
-    // Тестируем обработку ошибок
+    // Test error handling
     describe('Error Handling', function() {
         it('should throw NodeOperationError when no events found', function() {
-            // Тест проверяет что при отсутствии событий выбрасывается правильная ошибка
-            // Вместо возврата объекта с message
+            // Test that the correct error is thrown when no events are found
+            // Instead of returning an object with a message
             console.log('✓ "No events found" error handling validated');
             
-            // Симулируем структуру ошибки
+            // Simulate error structure
             const expectedErrorStructure = {
                 type: 'NodeOperationError',
                 message: 'No events found for [date]. Calendar: [path], Objects found: [count]',
@@ -64,22 +64,22 @@ describe('CalDAV Node Tests', function() {
         });
         
         it('should provide detailed error information', function() {
-            // Проверяем что ошибка содержит полезную информацию:
-            // - Дату поиска
-            // - Путь к календарю  
-            // - Количество найденных объектов
+            // Check that the error contains useful information:
+            // - Search date
+            // - Calendar path  
+            // - Number of found objects
             console.log('✓ Detailed error information test structure ready');
             assert.ok(true, 'Detailed error info test passed');
         });
         
         it('should handle calendar loading errors gracefully', function() {
-            // Тест обработки ошибок при загрузке списка календарей
+            // Test error handling when loading calendar list
             console.log('✓ Calendar loading error handling test structure ready');
             assert.ok(true, 'Calendar loading error test passed');
         });
     });
     
-    // Тестируем парсинг дат (сохраняем существующую функциональность)
+    // Test date parsing while preserving existing functionality
     describe('Date Parsing', function() {
         it('should parse UTC dates correctly', function() {
             console.log('✓ UTC date parsing test structure ready');
@@ -92,13 +92,13 @@ describe('CalDAV Node Tests', function() {
         });
         
         it('should output ISO format dates', function() {
-            // Проверяем что dtStartISO и dtEndISO выводятся правильно
+            // Check that dtStartISO and dtEndISO are output correctly
             console.log('✓ ISO date output test structure ready');
             assert.ok(true, 'ISO date output test passed');
         });
     });
     
-    // Тестируем повторяющиеся события
+    // Test recurring events
     describe('Recurring Events', function() {
         it('should handle RRULE parsing correctly', function() {
             console.log('✓ RRULE parsing test structure ready');
@@ -117,38 +117,38 @@ describe('CalDAV Node Tests', function() {
     });
 });
 
-// Функция для вывода информации о тестировании
+// Print test information
 function logTestingInfo() {
     console.log('\n=== CalDAV Node Testing Summary ===');
-    console.log('✅ Новые функции протестированы:');
+    console.log('✅ New features tested:');
     console.log('');
-    console.log('1. 🎯 Динамическая загрузка календарей');
+    console.log('1. 🎯 Dynamic calendar loading');
     console.log('   - loadOptionsMethod: getCalendars');
-    console.log('   - Улучшенные названия с типами');
-    console.log('   - Поддержка displayName, name, description');
+    console.log('   - Improved names with types');
+    console.log('   - Support for displayName, name, description');
     console.log('');
-    console.log('2. ❌ Правильная обработка ошибок');
-    console.log('   - NodeOperationError при отсутствии событий');
-    console.log('   - Детальная информация в ошибках');
-    console.log('   - Graceful handling при загрузке календарей');
+    console.log('2. ❌ Proper error handling');
+    console.log('   - NodeOperationError when no events are found');
+    console.log('   - Detailed information in errors');
+    console.log('   - Graceful handling when loading calendars');
     console.log('');
-    console.log('3. 📅 Улучшенное форматирование календарей');
-    console.log('   - Определение типов (События/Задачи/Календарь)');
-    console.log('   - Относительные пути без serverUrl');
-    console.log('   - Сортировка по названию');
+    console.log('3. 📅 Improved calendar formatting');
+    console.log('   - Type detection (Events/Tasks/Calendar)');
+    console.log('   - Relative paths without serverUrl');
+    console.log('   - Sort by name');
     console.log('');
-    console.log('4. 🔄 Сохранена совместимость');
-    console.log('   - Парсинг дат и таймзон');
-    console.log('   - Обработка повторяющихся событий');
-    console.log('   - ISO формат вывода');
+    console.log('4. 🔄 Compatibility preserved');
+    console.log('   - Date and timezone parsing');
+    console.log('   - Recurring event handling');
+    console.log('   - ISO output format');
     console.log('');
-    console.log('🚀 Для реального тестирования:');
-    console.log('   - Откройте n8n по адресу http://localhost:5678');
-    console.log('   - Добавьте CalDAV node в workflow');
-    console.log('   - Проверьте выпадающий список календарей');
-    console.log('   - Протестируйте обработку ошибок');
+    console.log('🚀 For real testing:');
+    console.log('   - Open n8n at http://localhost:5678');
+    console.log('   - Add the CalDAV node to a workflow');
+    console.log('   - Check the calendar dropdown list');
+    console.log('   - Test error handling');
     console.log('=====================================\n');
 }
 
-// Запускаем информацию о тестировании
+// Print test information
 logTestingInfo(); 

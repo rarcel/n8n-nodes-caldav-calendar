@@ -29,7 +29,7 @@ describe('CalDAV Node Structure Tests', function() {
             const packagePath = path.join(__dirname, '..', 'package.json');
             const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
             
-            // Проверяем основные поля
+            // Check core fields
             assert.strictEqual(packageJson.name, 'n8n-nodes-caldav-calendar', 'Package name should be correct');
             assert.ok(packageJson.n8n, 'Should have n8n configuration');
             assert.ok(packageJson.n8n.nodes, 'Should have nodes configuration');
@@ -55,7 +55,7 @@ describe('CalDAV Node Structure Tests', function() {
     
     describe('Node Dependencies', function() {
         it('should load required dependencies', function() {
-            // Проверяем что основные зависимости доступны
+            // Check that core dependencies are available
             try {
                 require('dav');
                 console.log('✓ DAV library loaded successfully');
@@ -84,7 +84,7 @@ describe('CalDAV Node Structure Tests', function() {
         });
         
         it('should have compiled without typescript errors', function() {
-            // Если компиляция прошла успешно, значит TypeScript ошибок нет
+            // If compilation succeeded, there are no TypeScript errors
             const distPath = path.join(__dirname, '..', 'dist');
             assert.ok(fs.existsSync(distPath), 'Dist directory should exist after successful compilation');
             console.log('✓ TypeScript compilation successful');
@@ -92,26 +92,26 @@ describe('CalDAV Node Structure Tests', function() {
     });
 });
 
-// Дополнительная информация для разработчиков
+// Additional information for developers
 function logNodeInfo() {
     console.log('\n=== CalDAV Node Structure Summary ===');
-    console.log('📦 Файловая структура:');
+    console.log('📦 File structure:');
     console.log('   ✅ dist/nodes/Caldav/Caldav.node.js');
     console.log('   ✅ dist/credentials/CaldavApi.credentials.js');
     console.log('   ✅ dist/nodes/Caldav/caldav.svg');
     console.log('');
-    console.log('⚙️ Конфигурация:');
-    console.log('   ✅ package.json с n8n секцией');
-    console.log('   ✅ Тестовые скрипты настроены');
-    console.log('   ✅ Зависимости корректны');
+    console.log('⚙️ Configuration:');
+    console.log('   ✅ package.json with n8n section');
+    console.log('   ✅ Test scripts configured');
+    console.log('   ✅ Dependencies are valid');
     console.log('');
     console.log('🔧 TypeScript:');
-    console.log('   ✅ Компиляция без ошибок');
-    console.log('   ✅ Типы DAV библиотеки');
+    console.log('   ✅ Compilation without errors');
+    console.log('   ✅ DAV library types');
     console.log('');
-    console.log('🚀 Готово к использованию в n8n!');
+    console.log('🚀 Ready to use in n8n!');
     console.log('======================================\n');
 }
 
-// Запускаем информацию
+// Print information
 logNodeInfo(); 
