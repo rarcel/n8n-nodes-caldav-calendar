@@ -133,7 +133,7 @@ class DigestTransport {
 					const responseText = Buffer.concat(chunks).toString('utf8');
 
 					resolve({
-						responseText: request.transformResponse ? request.transformResponse(responseText) as string : responseText,
+						responseText,
 						status: response.statusCode || 0,
 						xhr: {
 							getResponseHeader: (name: string) => {
