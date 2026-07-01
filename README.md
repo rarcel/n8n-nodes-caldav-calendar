@@ -9,7 +9,7 @@ A simple n8n community node for working with CalDAV calendars.
 - **Dynamic calendar loading** - automatically fetch available calendars from server
 - **Smart calendar names** - display user-friendly names instead of technical paths  
 - **Calendar type detection** - automatically identify calendar types (Events/Tasks/Calendar)
-- **Get calendar events** for a specific date
+- **Get calendar events** for a date range
 - **Create new events** in calendar
 - **Delete events** by UID
 - **Connect to any CalDAV server** (Google Calendar, Apple iCloud, NextCloud, etc.)
@@ -83,7 +83,7 @@ Or via n8n UI:
 1. Add CalDAV node to your workflow
 2. Select the created credentials
 3. **Choose calendar from dropdown list** 📅 (automatically loaded from server)
-4. Select date to get events
+4. Select the start and end dates to get events
 5. Execute workflow
 
 ### 🤖 Using as AI Tool
@@ -104,11 +104,12 @@ The CalDAV node supports usage as an AI Tool for AI Agent:
 ## 📖 Operations
 
 ### Get Events
-Retrieves calendar events for a specific date.
+Retrieves calendar events for a date range.
 
 **Parameters:**
 - `Calendar Name or ID` - select calendar from list
-- `Date` - date to get events for (ISO 8601 format)
+- `Start Date` - start of the date range to get events for (ISO 8601 format)
+- `End Date` - end of the date range to get events for (ISO 8601 format)
 
 **Returns:** Array of events with fields `uid`, `summary`, `description`, `location`, `dtStart`, `dtEnd`, `url`, `etag`
 

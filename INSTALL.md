@@ -65,7 +65,7 @@ npm publish
 1. Add the CalDAV node to a workflow.
 2. Select the created credentials.
 3. Select the calendar from the dropdown list.
-4. Choose the date for retrieving events.
+4. Choose the start and end dates for retrieving events.
 5. Run the workflow.
 
 The node returns an array of events with fields such as `uid`, `summary`, `description`, `dtStart`, `dtEnd`, `url`, `etag`, and `calendarData`.

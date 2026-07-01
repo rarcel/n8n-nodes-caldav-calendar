@@ -357,7 +357,7 @@ export class Caldav implements INodeType {
 					{
 						name: 'Get Events',
 						value: 'getEvents',
-						description: 'Get calendar events for a specific date',
+						description: 'Get calendar events for a date range',
 						action: 'Get events',
 					},
 					{
@@ -390,11 +390,24 @@ export class Caldav implements INodeType {
 				},
 			},
 			{
-				displayName: 'Date',
-				name: 'date',
+				displayName: 'Start Date',
+				name: 'startDate',
 				type: 'dateTime',
 				default: '',
-				description: 'Date to get events for',
+				description: 'Start of the date range to get events for',
+				required: true,
+				displayOptions: {
+					show: {
+						operation: ['getEvents'],
+					},
+				},
+			},
+			{
+				displayName: 'End Date',
+				name: 'endDate',
+				type: 'dateTime',
+				default: '',
+				description: 'End of the date range to get events for',
 				required: true,
 				displayOptions: {
 					show: {
@@ -950,6 +963,26 @@ export class Caldav implements INodeType {
 			return { actualStartDate, actualEndDate };
 		};
 
+		const getDatesInRange = (startDate: Date, endDate: Date): Date[] => {
+			const dates: Date[] = [];
+			const currentDate = new Date(startDate);
+			currentDate.setHours(0, 0, 0, 0);
+
+			const lastDate = new Date(endDate);
+			lastDate.setHours(0, 0, 0, 0);
+
+			while (currentDate <= lastDate) {
+				dates.push(new Date(currentDate));
+				currentDate.setDate(currentDate.getDate() + 1);
+			}
+
+			return dates;
+		};
+
+		const isDateInRange = (date: Date, startDate: Date, endDate: Date): boolean => {
+			return date >= startDate && date <= endDate;
+		};
+
 		// Improved recurring event matching
 		const isRecurringEventOnDate = (eventStartDate: Date, targetDate: Date, rrule: string, eventData: string): boolean => {
 			// If the event starts after the target date, it cannot recur in the past
@@ -1461,17 +1494,18 @@ export class Caldav implements INodeType {
 
 				} else if (operation === 'getEvents') {
 					const calendarUrl = this.getNodeParameter('calendarUrl', i) as string;
-					const date = this.getNodeParameter('date', i) as string;
+					const startDateValue = this.getNodeParameter('startDate', i) as string;
+					const endDateValue = this.getNodeParameter('endDate', i) as string;
 
-					if (!date) {
+					if (!startDateValue || !endDateValue) {
 						throw new NodeOperationError(
 							this.getNode(),
-							'Date is required to get calendar events.',
+							'Start Date and End Date are required to get calendar events.',
 							{ itemIndex: i }
 						);
 					}
 
-					this.logger?.info(`[CalDAV GET] Getting events for date: ${date} from calendar: ${calendarUrl}`);
+					this.logger?.info(`[CalDAV GET] Getting events from ${startDateValue} to ${endDateValue} from calendar: ${calendarUrl}`);
 
 					// Create optimized authentication transport
 					const xhr = createOptimizedXhr(credentials);
@@ -1522,21 +1556,39 @@ export class Caldav implements INodeType {
 						);
 						}
 
-						// Form date range for request (day from 00:00 to 23:59)
-						const targetDate = new Date(date);
-						if (Number.isNaN(targetDate.getTime())) {
+						const rangeStartDate = new Date(startDateValue);
+						if (Number.isNaN(rangeStartDate.getTime())) {
 							throw new NodeOperationError(
 								this.getNode(),
-								`Invalid date value: ${date}`,
+								`Invalid start date value: ${startDateValue}`,
 								{ itemIndex: i }
 							);
 						}
 
-						const startDate = new Date(targetDate);
+						const rangeEndDate = new Date(endDateValue);
+						if (Number.isNaN(rangeEndDate.getTime())) {
+							throw new NodeOperationError(
+								this.getNode(),
+								`Invalid end date value: ${endDateValue}`,
+								{ itemIndex: i }
+							);
+						}
+
+						const startDate = new Date(rangeStartDate);
 						startDate.setHours(0, 0, 0, 0);
 						
-						const endDate = new Date(targetDate);
+						const endDate = new Date(rangeEndDate);
 						endDate.setHours(23, 59, 59, 999);
+
+						if (startDate > endDate) {
+							throw new NodeOperationError(
+								this.getNode(),
+								'Start Date must be before or equal to End Date.',
+								{ itemIndex: i }
+							);
+						}
+
+						const rangeDates = getDatesInRange(startDate, endDate);
 
 						// Synchronize calendar and get events
 						const syncedCalendar = await dav.syncCalendar(calendar, {
@@ -1567,8 +1619,8 @@ export class Caldav implements INodeType {
 							}
 						}
 						
-						// Filter events by date
-						const eventsForDate: CalendarEvent[] = [];
+						// Filter events by date range
+						const eventsForRange: CalendarEvent[] = [];
 						
 						this.logger?.info(`[CalDAV GET] Processing ${calendarObjects.length} calendar objects`);
 						
@@ -1602,9 +1654,9 @@ export class Caldav implements INodeType {
 									
 									const eventDate = parsedDate.date;
 									
-									// Check direct date match
-									if (eventDate.toDateString() === targetDate.toDateString()) {
-										eventsForDate.push({
+									// Check direct date range match
+									if (isDateInRange(eventDate, startDate, endDate)) {
+										eventsForRange.push({
 											...obj,
 											calendarData: eventData
 										});
@@ -1613,7 +1665,11 @@ export class Caldav implements INodeType {
 									
 									// Check recurrence rules (RRULE)
 									const rruleMatch = eventData.match(/RRULE:([^\r\n]+)/);
-									if (rruleMatch && isRecurringEventOnDate(eventDate, targetDate, rruleMatch[1], eventData)) {
+									const matchingRecurringDate = rruleMatch
+										? rangeDates.find(rangeDate => isRecurringEventOnDate(eventDate, rangeDate, rruleMatch[1], eventData))
+										: undefined;
+
+									if (rruleMatch && matchingRecurringDate) {
 										// Calculate actual dates for recurring events
 										// Also parse DTEND to calculate duration
 										const dtEndMatch = eventData.match(/DTEND[^:]*:(.+)/);
@@ -1624,7 +1680,7 @@ export class Caldav implements INodeType {
 										const { actualStartDate, actualEndDate } = calculateRecurringEventDates(
 											eventDate, 
 											parsedEndDate?.date || null, 
-											targetDate
+											matchingRecurringDate
 										);
 										
 										// Create modified event data with actual dates
@@ -1649,7 +1705,7 @@ export class Caldav implements INodeType {
 											modifiedEventData = modifiedEventData.replace(endLine, newEndLine);
 										}
 										
-										eventsForDate.push({
+										eventsForRange.push({
 											...obj,
 											calendarData: modifiedEventData
 										});
@@ -1659,10 +1715,10 @@ export class Caldav implements INodeType {
 							}
 						}
 
-						this.logger?.info(`[CalDAV GET] Found ${eventsForDate.length} events for date ${date}`);
+						this.logger?.info(`[CalDAV GET] Found ${eventsForRange.length} events from ${startDateValue} to ${endDateValue}`);
 
 						// Process found events
-						for (const event of eventsForDate) {
+						for (const event of eventsForRange) {
 							const eventData = event.calendarData;
 							
 							// Check that eventData exists
@@ -1710,7 +1766,7 @@ export class Caldav implements INodeType {
 						}
 
 						// If no events found, return search information
-						if (eventsForDate.length === 0) {
+						if (eventsForRange.length === 0) {
 							// Add sample events for debugging
 							const sampleEvents: SampleEvent[] = [];
 							
@@ -1755,10 +1811,10 @@ export class Caldav implements INodeType {
 							// Throw error when no events found
 							throw new NodeOperationError(
 								this.getNode(),
-								`No events found for ${targetDate.toDateString()}. Calendar: ${calendarUrl}, Objects found: ${calendarObjects.length}`,
+								`No events found from ${startDate.toDateString()} to ${endDate.toDateString()}. Calendar: ${calendarUrl}, Objects found: ${calendarObjects.length}`,
 								{
 									itemIndex: i,
-									description: 'No events found for the specified date',
+									description: 'No events found for the specified date range',
 								}
 							);
 						}

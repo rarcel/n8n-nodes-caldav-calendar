@@ -54,7 +54,7 @@ describe('CalDAV Node Tests', function() {
             // Simulate error structure
             const expectedErrorStructure = {
                 type: 'NodeOperationError',
-                message: 'No events found for [date]. Calendar: [path], Objects found: [count]',
+                message: 'No events found from [start date] to [end date]. Calendar: [path], Objects found: [count]',
                 hasItemIndex: true,
                 hasDescription: true
             };
@@ -65,7 +65,7 @@ describe('CalDAV Node Tests', function() {
         
         it('should provide detailed error information', function() {
             // Check that the error contains useful information:
-            // - Search date
+            // - Search date range
             // - Calendar path  
             // - Number of found objects
             console.log('✓ Detailed error information test structure ready');
