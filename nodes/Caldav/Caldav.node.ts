@@ -58,6 +58,7 @@ class DigestRequest {
 }
 
 class DigestTransport {
+	credentials: dav.Credentials;
 	private nonceCount = 0;
 	private readonly username: string;
 	private readonly password: string;
@@ -67,6 +68,10 @@ class DigestTransport {
 		this.username = credentials.username as string;
 		this.password = credentials.password as string;
 		this.serverUrl = credentials.serverUrl as string;
+		this.credentials = new dav.Credentials({
+			username: this.username,
+			password: this.password,
+		});
 	}
 
 	async send(request: DavRequest, url: string, headers: Record<string, string> = {}): Promise<DavResponse> {
@@ -390,6 +395,7 @@ export class Caldav implements INodeType {
 				type: 'dateTime',
 				default: '',
 				description: 'Date to get events for',
+				required: true,
 				displayOptions: {
 					show: {
 						operation: ['getEvents'],
@@ -1457,6 +1463,14 @@ export class Caldav implements INodeType {
 					const calendarUrl = this.getNodeParameter('calendarUrl', i) as string;
 					const date = this.getNodeParameter('date', i) as string;
 
+					if (!date) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'Date is required to get calendar events.',
+							{ itemIndex: i }
+						);
+					}
+
 					this.logger?.info(`[CalDAV GET] Getting events for date: ${date} from calendar: ${calendarUrl}`);
 
 					// Создаем оптимизированный транспорт для аутентификации
@@ -1510,6 +1524,14 @@ export class Caldav implements INodeType {
 
 						// Form date range for request (day from 00:00 to 23:59)
 						const targetDate = new Date(date);
+						if (Number.isNaN(targetDate.getTime())) {
+							throw new NodeOperationError(
+								this.getNode(),
+								`Invalid date value: ${date}`,
+								{ itemIndex: i }
+							);
+						}
+
 						const startDate = new Date(targetDate);
 						startDate.setHours(0, 0, 0, 0);
 						
