@@ -33,6 +33,23 @@ export class CaldavApi implements ICredentialType {
 			},
 			default: '',
 		},
+		{
+			displayName: 'Authentication',
+			name: 'authentication',
+			type: 'options',
+			default: 'basic',
+			options: [
+				{
+					name: 'Basic',
+					value: 'basic',
+				},
+				{
+					name: 'Digest',
+					value: 'digest',
+				},
+			],
+			description: 'Use Digest for Baikal servers that return WWW-Authenticate: Digest',
+		},
 	];
 
 	authenticate: IAuthenticateGeneric = {

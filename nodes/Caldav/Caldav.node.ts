@@ -1,4 +1,11 @@
 import {
+	createHash,
+	randomBytes,
+} from 'crypto';
+import * as http from 'http';
+import * as https from 'https';
+
+import {
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeType,
@@ -11,6 +18,182 @@ import {
 } from 'n8n-workflow';
 
 import * as dav from 'dav';
+
+type DavTransport = dav.transport.Basic | DigestTransport;
+
+interface DavRequest {
+	method?: string;
+	requestData?: string;
+	transformRequest?: (data: unknown) => unknown;
+	transformResponse?: (data: unknown) => unknown;
+}
+
+interface DavResponse {
+	responseText: string;
+	status: number;
+	xhr: {
+		getResponseHeader: (name: string) => string;
+	};
+}
+
+interface DigestChallenge {
+	realm: string;
+	nonce: string;
+	qop?: string;
+	opaque?: string;
+	algorithm?: string;
+}
+
+class DigestTransport {
+	private nonceCount = 0;
+	private readonly username: string;
+	private readonly password: string;
+
+	constructor(credentials: ICredentialDataDecryptedObject) {
+		this.username = credentials.username as string;
+		this.password = credentials.password as string;
+	}
+
+	async send(request: DavRequest, url: string, headers: Record<string, string> = {}): Promise<DavResponse> {
+		const firstResponse = await this.request(request, url, headers);
+
+		if (firstResponse.status !== 401) {
+			this.assertSuccess(firstResponse, url);
+			return firstResponse;
+		}
+
+		const authenticateHeader = firstResponse.xhr.getResponseHeader('www-authenticate');
+		if (!authenticateHeader.toLowerCase().startsWith('digest')) {
+			this.assertSuccess(firstResponse, url);
+		}
+
+		const challenge = this.parseDigestChallenge(authenticateHeader);
+		const authHeader = this.createDigestAuthorization(request.method || 'GET', url, challenge);
+		const secondResponse = await this.request(request, url, {
+			...headers,
+			Authorization: authHeader,
+		});
+
+		this.assertSuccess(secondResponse, url);
+		return secondResponse;
+	}
+
+	private async request(request: DavRequest, url: string, headers: Record<string, string>): Promise<DavResponse> {
+		const method = request.method || 'GET';
+		const body = request.transformRequest ? request.transformRequest(request.requestData || '') : request.requestData || '';
+		const parsedUrl = new URL(url);
+		const transport = parsedUrl.protocol === 'https:' ? https : http;
+
+		return await new Promise((resolve, reject) => {
+			const req = transport.request(url, {
+				method,
+				headers,
+			}, response => {
+				const chunks: Buffer[] = [];
+
+				response.on('data', chunk => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+				response.on('end', () => {
+					const responseText = Buffer.concat(chunks).toString('utf8');
+
+					resolve({
+						responseText: request.transformResponse ? request.transformResponse(responseText) as string : responseText,
+						status: response.statusCode || 0,
+						xhr: {
+							getResponseHeader: (name: string) => {
+								const value = response.headers[name.toLowerCase()];
+								return Array.isArray(value) ? value.join(', ') : value || '';
+							},
+						},
+					});
+				});
+			});
+
+			req.on('error', reject);
+
+			if (method !== 'GET' && method !== 'HEAD' && body) {
+				req.write(body as string);
+			}
+
+			req.end();
+		});
+	}
+
+	private parseDigestChallenge(header: string): DigestChallenge {
+		const challenge: Record<string, string> = {};
+		const digestParameters = header.replace(/^Digest\s+/i, '');
+		const matches = digestParameters.match(/(\w+)=(?:"([^"]*)"|([^,]*))/g) || [];
+
+		for (const parameter of matches) {
+			const match = parameter.match(/(\w+)=(?:"([^"]*)"|([^,]*))/);
+			if (!match) continue;
+			challenge[match[1]] = match[2] || match[3] || '';
+		}
+
+		if (!challenge.realm || !challenge.nonce) {
+			throw new Error('Invalid Digest authentication challenge from CalDAV server');
+		}
+
+		return challenge as unknown as DigestChallenge;
+	}
+
+	private createDigestAuthorization(method: string, url: string, challenge: DigestChallenge): string {
+		const parsedUrl = new URL(url);
+		const uri = `${parsedUrl.pathname}${parsedUrl.search}`;
+		const qop = challenge.qop?.split(',').map(value => value.trim()).includes('auth') ? 'auth' : undefined;
+		const nc = (++this.nonceCount).toString(16).padStart(8, '0');
+		const cnonce = randomBytes(8).toString('hex');
+		const algorithm = challenge.algorithm || 'MD5';
+
+		if (algorithm.toUpperCase() !== 'MD5') {
+			throw new Error(`Unsupported Digest algorithm: ${algorithm}`);
+		}
+
+		const ha1 = this.md5(`${this.username}:${challenge.realm}:${this.password}`);
+		const ha2 = this.md5(`${method}:${uri}`);
+		const response = qop
+			? this.md5(`${ha1}:${challenge.nonce}:${nc}:${cnonce}:${qop}:${ha2}`)
+			: this.md5(`${ha1}:${challenge.nonce}:${ha2}`);
+
+		const parts = [
+			`username="${this.username}"`,
+			`realm="${challenge.realm}"`,
+			`nonce="${challenge.nonce}"`,
+			`uri="${uri}"`,
+			`response="${response}"`,
+			`algorithm=${algorithm}`,
+		];
+
+		if (challenge.opaque) parts.push(`opaque="${challenge.opaque}"`);
+		if (qop) parts.push(`qop=${qop}`, `nc=${nc}`, `cnonce="${cnonce}"`);
+
+		return `Digest ${parts.join(', ')}`;
+	}
+
+	private md5(value: string): string {
+		return createHash('md5').update(value).digest('hex');
+	}
+
+	private assertSuccess(response: DavResponse, url: string): void {
+		if (response.status >= 200 && response.status < 300) return;
+
+		const error = new Error(`HTTP ${response.status} returned by ${url}`) as Error & { status?: number };
+		error.status = response.status;
+		throw error;
+	}
+}
+
+const createDavTransport = (credentials: ICredentialDataDecryptedObject): DavTransport => {
+	if (credentials.authentication === 'digest') {
+		return new DigestTransport(credentials);
+	}
+
+	return new dav.transport.Basic(
+		new dav.Credentials({
+			username: credentials.username as string,
+			password: credentials.password as string,
+		})
+	);
+};
 
 /**
  * Enum для частот повторения событий в RRULE
@@ -276,12 +459,7 @@ export class Caldav implements INodeType {
 					const credentials = await this.getCredentials('caldavApi');
 
 					// Создаем транспорт для аутентификации
-					const xhr = new dav.transport.Basic(
-						new dav.Credentials({
-							username: credentials.username as string,
-							password: credentials.password as string,
-						})
-					);
+					const xhr = createDavTransport(credentials);
 
 					// Создаем аккаунт CalDAV и загружаем календари
 					const account = await dav.createAccount({
@@ -426,7 +604,7 @@ export class Caldav implements INodeType {
 		};
 
 		// Функция для поиска события по имени файла (альтернативный метод)
-		const findEventByFilename = async (calendarUrl: string, uid: string, xhr: dav.transport.Basic) => {
+		const findEventByFilename = async (calendarUrl: string, uid: string, xhr: DavTransport) => {
 			try {
 				// Создаем аккаунт CalDAV
 				const account = await dav.createAccount({
@@ -484,7 +662,7 @@ export class Caldav implements INodeType {
 		};
 
 		// Функция для поиска события по UID в календаре
-		const findEventByUID = async (calendarUrl: string, uid: string, xhr: dav.transport.Basic) => {
+		const findEventByUID = async (calendarUrl: string, uid: string, xhr: DavTransport) => {
 			try {
 				// Создаем аккаунт CalDAV
 				const account = await dav.createAccount({
@@ -858,7 +1036,7 @@ export class Caldav implements INodeType {
 		};
 
 		// Функция для создания оптимизированного xhr транспорта
-		const createOptimizedXhr = (credentials: ICredentialDataDecryptedObject) => {
+		const createOptimizedXhr = (credentials: ICredentialDataDecryptedObject): DavTransport => {
 			// Предупреждаем о проблемах с Yandex CalDAV
 			const serverUrl = credentials.serverUrl as string;
 			if (serverUrl.includes('yandex.ru')) {
@@ -866,16 +1044,11 @@ export class Caldav implements INodeType {
 				this.logger?.info(`[CalDAV INFO] Consider using Yandex Calendar API or alternative CalDAV provider for better reliability.`);
 			}
 
-			const xhr = new dav.transport.Basic(
-				new dav.Credentials({
-					username: credentials.username as string,
-					password: credentials.password as string,
-				})
-			);
+			const xhr = createDavTransport(credentials);
 
 			// Добавляем кастомный обработчик для оптимизации заголовков
 			const originalSend = xhr.send.bind(xhr);
-			xhr.send = async function(request: unknown, url: string, headers: Record<string, string> = {}) {
+			xhr.send = async function(request: DavRequest, url: string, headers: Record<string, string> = {}) {
 				// Добавляем стандартные заголовки для лучшей совместимости с Yandex
 				const optimizedHeaders = {
 					'User-Agent': 'n8n-caldav-node/1.0',
