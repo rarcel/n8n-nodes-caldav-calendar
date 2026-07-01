@@ -76,7 +76,7 @@ class DigestTransport {
 
 		const requestHeaders = {
 			...digestRequest.getHeaders(),
-			...headers,
+			...this.getHttpHeaders(headers),
 		};
 
 		try {
@@ -157,6 +157,17 @@ class DigestTransport {
 
 	private resolveUrl(url: string): string {
 		return new URL(url, this.serverUrl).toString();
+	}
+
+	private getHttpHeaders(headers: Record<string, unknown>): Record<string, string> {
+		const httpHeaders: Record<string, string> = {};
+
+		for (const [name, value] of Object.entries(headers)) {
+			if (name === 'sandbox' || value === undefined || value === null) continue;
+			httpHeaders[name] = String(value);
+		}
+
+		return httpHeaders;
 	}
 
 	private transformResponse(request: DavRequest, response: DavResponse): DavResponse {
