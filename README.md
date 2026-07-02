@@ -110,8 +110,10 @@ Retrieves calendar events for a date range.
 - `Calendar Name or ID` - select calendar from list
 - `Start Date` - start of the date range to get events for (ISO 8601 format)
 - `End Date` - end of the date range to get events for (ISO 8601 format)
+- `Timezone Mode` - use the workflow timezone or a custom IANA timezone
+- `Timezone` - custom IANA timezone such as `Europe/Paris` when custom mode is selected
 
-**Returns:** Array of events with fields `uid`, `summary`, `description`, `location`, `dtStart`, `dtEnd`, `url`, `etag`
+**Returns:** Array of events with fields `uid`, `summary`, `description`, `location`, `dtStart`, `dtEnd`, `dtStartISO`, `dtEndISO`, `timezone`, `url`, `etag`
 
 ### Create Event
 Creates a new event in the calendar.

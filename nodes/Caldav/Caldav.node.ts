@@ -308,6 +308,16 @@ interface ParsedICalDate {
 	timezone?: string;
 	isUtc: boolean;
 	originalString: string;
+	isAllDay: boolean;
+}
+
+interface DateParts {
+	year: number;
+	month: number;
+	day: number;
+	hour: number;
+	minute: number;
+	second: number;
 }
 
 /**
@@ -412,6 +422,42 @@ export class Caldav implements INodeType {
 				displayOptions: {
 					show: {
 						operation: ['getEvents'],
+					},
+				},
+			},
+			{
+				displayName: 'Timezone Mode',
+				name: 'timezoneMode',
+				type: 'options',
+				default: 'workflow',
+				description: 'Timezone used to filter and format returned event dates',
+				options: [
+					{
+						name: 'Workflow Timezone',
+						value: 'workflow',
+					},
+					{
+						name: 'Custom Timezone',
+						value: 'custom',
+					},
+				],
+				displayOptions: {
+					show: {
+						operation: ['getEvents'],
+					},
+				},
+			},
+			{
+				displayName: 'Timezone',
+				name: 'timezone',
+				type: 'string',
+				default: 'Europe/Paris',
+				description: 'IANA timezone, for example Europe/Paris or America/New_York',
+				required: true,
+				displayOptions: {
+					show: {
+						operation: ['getEvents'],
+						timezoneMode: ['custom'],
 					},
 				},
 			},
@@ -817,13 +863,110 @@ export class Caldav implements INodeType {
 			}
 		};
 
+		const validateTimezone = (timezone: string): void => {
+			try {
+				new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date());
+			} catch (error) {
+				throw new NodeOperationError(
+					this.getNode(),
+					`Invalid timezone: ${timezone}. Use an IANA timezone such as Europe/Paris.`,
+				);
+			}
+		};
+
+		const getZonedParts = (date: Date, timezone: string): DateParts => {
+			const parts = new Intl.DateTimeFormat('en-US', {
+				timeZone: timezone,
+				year: 'numeric',
+				month: '2-digit',
+				day: '2-digit',
+				hour: '2-digit',
+				minute: '2-digit',
+				second: '2-digit',
+				hourCycle: 'h23',
+			}).formatToParts(date);
+
+			const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+			return {
+				year: Number(values.year),
+				month: Number(values.month),
+				day: Number(values.day),
+				hour: Number(values.hour),
+				minute: Number(values.minute),
+				second: Number(values.second),
+			};
+		};
+
+		const getTimezoneOffsetMs = (timezone: string, date: Date): number => {
+			const parts = getZonedParts(date, timezone);
+			const zonedTimeAsUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+			return zonedTimeAsUtc - date.getTime();
+		};
+
+		const zonedTimeToUtc = (parts: DateParts, timezone: string): Date => {
+			let utcTime = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+			let offset = getTimezoneOffsetMs(timezone, new Date(utcTime));
+			utcTime -= offset;
+
+			const secondOffset = getTimezoneOffsetMs(timezone, new Date(utcTime));
+			if (secondOffset !== offset) {
+				utcTime = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - secondOffset;
+			}
+
+			return new Date(utcTime);
+		};
+
+		const formatDateInTimezone = (date: Date, timezone: string): string => {
+			const parts = getZonedParts(date, timezone);
+			const offsetMinutes = getTimezoneOffsetMs(timezone, date) / 60000;
+			const offsetSign = offsetMinutes >= 0 ? '+' : '-';
+			const absoluteOffset = Math.abs(offsetMinutes);
+			const offsetHours = Math.floor(absoluteOffset / 60);
+			const offsetRemainderMinutes = absoluteOffset % 60;
+
+			return `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}T${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}:${String(parts.second).padStart(2, '0')}${offsetSign}${String(offsetHours).padStart(2, '0')}:${String(offsetRemainderMinutes).padStart(2, '0')}`;
+		};
+
+		const getTimezoneDateKey = (date: Date, timezone: string): string => {
+			const parts = getZonedParts(date, timezone);
+			return `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`;
+		};
+
+		const getDateRangeKeys = (startDate: Date, endDate: Date, timezone: string): string[] => {
+			const keys: string[] = [];
+			const startParts = getZonedParts(startDate, timezone);
+			const endKey = getTimezoneDateKey(endDate, timezone);
+			let cursor = zonedTimeToUtc({ ...startParts, hour: 0, minute: 0, second: 0 }, timezone);
+
+			while (true) {
+				const key = getTimezoneDateKey(cursor, timezone);
+				keys.push(key);
+				if (key === endKey) break;
+
+				const cursorParts = getZonedParts(cursor, timezone);
+				cursor = zonedTimeToUtc({ ...cursorParts, day: cursorParts.day + 1, hour: 0, minute: 0, second: 0 }, timezone);
+			}
+
+			return keys;
+		};
+
+		const parseICalParts = (dateStr: string): DateParts => ({
+			year: parseInt(dateStr.substring(0, 4), 10),
+			month: parseInt(dateStr.substring(4, 6), 10),
+			day: parseInt(dateStr.substring(6, 8), 10),
+			hour: dateStr.includes('T') ? parseInt(dateStr.substring(9, 11), 10) : 0,
+			minute: dateStr.includes('T') ? parseInt(dateStr.substring(11, 13), 10) : 0,
+			second: dateStr.includes('T') ? parseInt(dateStr.substring(13, 15), 10) : 0,
+		});
+
 		// Improved iCal date parsing with timezone support
-		const parseICalDate = (dateStr: string, eventData: string): ParsedICalDate | null => {
+		const parseICalDate = (dateStr: string, eventData: string, fallbackTimezone: string): ParsedICalDate | null => {
 			try {
 				const cleanDateStr = dateStr.trim();
 				let date: Date;
 				let timezone: string | undefined;
 				let isUtc = false;
+				let isAllDay = false;
 
 				// Look for VTIMEZONE in eventData to determine timezone
 				const timezoneMatch = eventData.match(/DTSTART;TZID=([^:]+):/);
@@ -835,43 +978,28 @@ export class Caldav implements INodeType {
 				if (cleanDateStr.endsWith('Z')) {
 					// UTC format: 20231025T120000Z
 					isUtc = true;
-					const year = parseInt(cleanDateStr.substring(0, 4));
-					const month = parseInt(cleanDateStr.substring(4, 6)) - 1;
-					const day = parseInt(cleanDateStr.substring(6, 8));
-					
+					const parts = parseICalParts(cleanDateStr);
+
 					if (cleanDateStr.includes('T')) {
-						const hour = parseInt(cleanDateStr.substring(9, 11));
-						const minute = parseInt(cleanDateStr.substring(11, 13));
-						const second = parseInt(cleanDateStr.substring(13, 15));
-						date = new Date(Date.UTC(year, month, day, hour, minute, second));
+						date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second));
 					} else {
-						date = new Date(Date.UTC(year, month, day));
+						isAllDay = true;
+						date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
 					}
 				} else if (cleanDateStr.includes('T')) {
 					// Format with time: YYYYMMDDTHHMMSS
-					const year = parseInt(cleanDateStr.substring(0, 4));
-					const month = parseInt(cleanDateStr.substring(4, 6)) - 1;
-					const day = parseInt(cleanDateStr.substring(6, 8));
-					const hour = parseInt(cleanDateStr.substring(9, 11));
-					const minute = parseInt(cleanDateStr.substring(11, 13));
-					const second = parseInt(cleanDateStr.substring(13, 15));
-					
-					if (timezone) {
-						// If timezone exists, create a local date and keep the timezone marker
-						date = new Date(year, month, day, hour, minute, second);
-					} else {
-						// Local time
-						date = new Date(year, month, day, hour, minute, second);
-					}
+					const parts = parseICalParts(cleanDateStr);
+					date = zonedTimeToUtc(parts, timezone || fallbackTimezone);
 				} else if (cleanDateStr.includes('-')) {
 					// YYYY-MM-DD format
-					date = new Date(cleanDateStr);
+					isAllDay = true;
+					const [year, month, day] = cleanDateStr.split('-').map(value => parseInt(value, 10));
+					date = zonedTimeToUtc({ year, month, day, hour: 0, minute: 0, second: 0 }, fallbackTimezone);
 				} else if (cleanDateStr.length === 8) {
 					// YYYYMMDD format (date only)
-					const year = parseInt(cleanDateStr.substring(0, 4));
-					const month = parseInt(cleanDateStr.substring(4, 6)) - 1;
-					const day = parseInt(cleanDateStr.substring(6, 8));
-					date = new Date(year, month, day);
+					isAllDay = true;
+					const parts = parseICalParts(cleanDateStr);
+					date = zonedTimeToUtc(parts, fallbackTimezone);
 				} else {
 					return null;
 				}
@@ -880,7 +1008,8 @@ export class Caldav implements INodeType {
 					date,
 					timezone,
 					isUtc,
-					originalString: cleanDateStr
+					originalString: cleanDateStr,
+					isAllDay,
 				};
 			} catch (error) {
 				return null;
@@ -888,33 +1017,36 @@ export class Caldav implements INodeType {
 		};
 
 		// Convert to ISO format with timezone information
-		const toISOWithTimezone = (parsedDate: ParsedICalDate): string => {
-			if (parsedDate.isUtc) {
-				return parsedDate.date.toISOString();
-			} else if (parsedDate.timezone) {
-				// Add timezone information when present
-				return parsedDate.date.toISOString() + ` (${parsedDate.timezone})`;
-			} else {
-				// Local time
-				return parsedDate.date.toISOString();
-			}
+		const toISOWithTimezone = (parsedDate: ParsedICalDate, timezone: string): string => {
+			return formatDateInTimezone(parsedDate.date, timezone);
 		};
 
 		// Format a date as iCal YYYYMMDDTHHMMSS
-		const formatDateToICal = (date: Date, isUtc: boolean = false): string => {
-			const year = date.getFullYear();
-			const month = String(date.getMonth() + 1).padStart(2, '0');
-			const day = String(date.getDate()).padStart(2, '0');
-			const hours = String(date.getHours()).padStart(2, '0');
-			const minutes = String(date.getMinutes()).padStart(2, '0');
-			const seconds = String(date.getSeconds()).padStart(2, '0');
+		const formatDateToICal = (date: Date, isUtc: boolean = false, timezone?: string): string => {
+			const parts = isUtc || !timezone
+				? {
+					year: date.getUTCFullYear(),
+					month: date.getUTCMonth() + 1,
+					day: date.getUTCDate(),
+					hour: date.getUTCHours(),
+					minute: date.getUTCMinutes(),
+					second: date.getUTCSeconds(),
+				}
+				: getZonedParts(date, timezone);
+
+			const year = parts.year;
+			const month = String(parts.month).padStart(2, '0');
+			const day = String(parts.day).padStart(2, '0');
+			const hours = String(parts.hour).padStart(2, '0');
+			const minutes = String(parts.minute).padStart(2, '0');
+			const seconds = String(parts.second).padStart(2, '0');
 			
 			const dateStr = `${year}${month}${day}T${hours}${minutes}${seconds}`;
 			return isUtc ? dateStr + 'Z' : dateStr;
 		};
 
 		// Check excluded dates (EXDATE)
-		const isDateExcluded = (targetDate: Date, eventData: string): boolean => {
+		const isDateExcluded = (targetDate: Date, eventData: string, timezone: string): boolean => {
 			const exdateMatches = eventData.match(/EXDATE[^:]*:([^\r\n]+)/g);
 			if (!exdateMatches) return false;
 			
@@ -922,13 +1054,10 @@ export class Caldav implements INodeType {
 				const dateMatch = exdateMatch.match(/EXDATE[^:]*:([^\r\n]+)/);
 				if (dateMatch) {
 					const exDateStr = dateMatch[1].trim();
-					const parsedExDate = parseICalDate(exDateStr, eventData);
+					const parsedExDate = parseICalDate(exDateStr, eventData, timezone);
 					if (parsedExDate) {
 						// Compare only the date and ignore time
-						const exDate = parsedExDate.date;
-						if (exDate.getFullYear() === targetDate.getFullYear() &&
-							exDate.getMonth() === targetDate.getMonth() &&
-							exDate.getDate() === targetDate.getDate()) {
+						if (getTimezoneDateKey(parsedExDate.date, timezone) === getTimezoneDateKey(targetDate, timezone)) {
 							return true;
 						}
 					}
@@ -938,18 +1067,20 @@ export class Caldav implements INodeType {
 		};
 
 		// Calculate actual dates for a recurring event on a target date
-		const calculateRecurringEventDates = (eventStartDate: Date, eventEndDate: Date | null, targetDate: Date): { actualStartDate: Date, actualEndDate: Date | null } => {
+		const calculateRecurringEventDates = (eventStartDate: Date, eventEndDate: Date | null, targetDate: Date, timezone: string): { actualStartDate: Date, actualEndDate: Date | null } => {
 			// Keep the time from the original event
-			const startTime = {
-				hours: eventStartDate.getHours(),
-				minutes: eventStartDate.getMinutes(),
-				seconds: eventStartDate.getSeconds(),
-				milliseconds: eventStartDate.getMilliseconds()
-			};
+			const startTime = getZonedParts(eventStartDate, timezone);
+			const targetDateParts = getZonedParts(targetDate, timezone);
 
 			// Create the actual start date on the target date with the original time
-			const actualStartDate = new Date(targetDate);
-			actualStartDate.setHours(startTime.hours, startTime.minutes, startTime.seconds, startTime.milliseconds);
+			const actualStartDate = zonedTimeToUtc({
+				year: targetDateParts.year,
+				month: targetDateParts.month,
+				day: targetDateParts.day,
+				hour: startTime.hour,
+				minute: startTime.minute,
+				second: startTime.second,
+			}, timezone);
 
 			let actualEndDate: Date | null = null;
 			if (eventEndDate) {
@@ -963,35 +1094,24 @@ export class Caldav implements INodeType {
 			return { actualStartDate, actualEndDate };
 		};
 
-		const getDatesInRange = (startDate: Date, endDate: Date): Date[] => {
-			const dates: Date[] = [];
-			const currentDate = new Date(startDate);
-			currentDate.setHours(0, 0, 0, 0);
-
-			const lastDate = new Date(endDate);
-			lastDate.setHours(0, 0, 0, 0);
-
-			while (currentDate <= lastDate) {
-				dates.push(new Date(currentDate));
-				currentDate.setDate(currentDate.getDate() + 1);
-			}
-
-			return dates;
-		};
-
 		const isDateInRange = (date: Date, startDate: Date, endDate: Date): boolean => {
 			return date >= startDate && date <= endDate;
 		};
 
 		// Improved recurring event matching
-		const isRecurringEventOnDate = (eventStartDate: Date, targetDate: Date, rrule: string, eventData: string): boolean => {
+		const isRecurringEventOnDate = (eventStartDate: Date, targetDate: Date, rrule: string, eventData: string, timezone: string): boolean => {
+			const eventStartParts = getZonedParts(eventStartDate, timezone);
+			const targetParts = getZonedParts(targetDate, timezone);
+			const dayNumber = (parts: DateParts) => Date.UTC(parts.year, parts.month - 1, parts.day) / (1000 * 60 * 60 * 24);
+			const dayOfWeek = (parts: DateParts) => new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+
 			// If the event starts after the target date, it cannot recur in the past
 			if (eventStartDate > targetDate) {
 				return false;
 			}
 
 			// Check excluded dates (EXDATE)
-			if (isDateExcluded(targetDate, eventData)) {
+			if (isDateExcluded(targetDate, eventData, timezone)) {
 				return false;
 			}
 
@@ -1011,7 +1131,7 @@ export class Caldav implements INodeType {
 
 			// Check recurrence end
 			if (rules['UNTIL']) {
-				const untilDate = parseICalDate(rules['UNTIL'], '');
+				const untilDate = parseICalDate(rules['UNTIL'], '', timezone);
 				if (untilDate && targetDate > untilDate.date) {
 					return false;
 				}
@@ -1023,8 +1143,7 @@ export class Caldav implements INodeType {
 				const interval = parseInt(rules['INTERVAL'] || '1');
 				
 				// Calculate elapsed intervals
-				const diffTime = targetDate.getTime() - eventStartDate.getTime();
-				const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+				const diffDays = dayNumber(targetParts) - dayNumber(eventStartParts);
 				
 				let intervalsPassed = 0;
 				switch (freq) {
@@ -1053,7 +1172,7 @@ export class Caldav implements INodeType {
 
 			switch (freq) {
 				case RecurrenceFrequency.DAILY: {
-					const daysDiff = Math.floor((targetDate.getTime() - eventStartDate.getTime()) / (1000 * 60 * 60 * 24));
+					const daysDiff = dayNumber(targetParts) - dayNumber(eventStartParts);
 					return daysDiff >= 0 && daysDiff % interval === 0;
 				}
 
@@ -1061,33 +1180,21 @@ export class Caldav implements INodeType {
 					// Check week days (BYDAY), required for weekly events
 					if (rules['BYDAY']) {
 						const allowedDays = rules['BYDAY'].split(',');
-						const targetDayOfWeek = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][targetDate.getDay()];
+						const targetDayOfWeek = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][dayOfWeek(targetParts)];
 						if (!allowedDays.includes(targetDayOfWeek)) {
 							return false;
 						}
 					} else {
 						// If BYDAY is not set, check the same weekday as the original event
-						if (targetDate.getDay() !== eventStartDate.getDay()) {
+						if (dayOfWeek(targetParts) !== dayOfWeek(eventStartParts)) {
 							return false;
 						}
 					}
 					
-					// Calculate the number of weeks between the original event and target date
-					const msPerDay = 24 * 60 * 60 * 1000;
-					const msPerWeek = 7 * msPerDay;
-					
-					// Find the week start for the original event (Monday)
-					const eventWeekStart = new Date(eventStartDate);
-					eventWeekStart.setDate(eventStartDate.getDate() - ((eventStartDate.getDay() + 6) % 7));
-					eventWeekStart.setHours(0, 0, 0, 0);
-					
-					// Find the week start for the target date
-					const targetWeekStart = new Date(targetDate);
-					targetWeekStart.setDate(targetDate.getDate() - ((targetDate.getDay() + 6) % 7));
-					targetWeekStart.setHours(0, 0, 0, 0);
-					
 					// Calculate the week difference
-					const weeksDiff = Math.floor((targetWeekStart.getTime() - eventWeekStart.getTime()) / msPerWeek);
+					const eventWeekStartDay = dayNumber(eventStartParts) - ((dayOfWeek(eventStartParts) + 6) % 7);
+					const targetWeekStartDay = dayNumber(targetParts) - ((dayOfWeek(targetParts) + 6) % 7);
+					const weeksDiff = Math.floor((targetWeekStartDay - eventWeekStartDay) / 7);
 					
 					// Check interval match
 					return weeksDiff >= 0 && weeksDiff % interval === 0;
@@ -1097,31 +1204,31 @@ export class Caldav implements INodeType {
 					// Check specific day of month (BYMONTHDAY)
 					if (rules['BYMONTHDAY']) {
 						const monthDay = parseInt(rules['BYMONTHDAY']);
-						if (targetDate.getDate() !== monthDay) {
+						if (targetParts.day !== monthDay) {
 							return false;
 						}
 					} else {
 						// Basic check: same day of month as the original event
-						if (targetDate.getDate() !== eventStartDate.getDate()) {
+						if (targetParts.day !== eventStartParts.day) {
 							return false;
 						}
 					}
 					
 					// Check monthly interval
-					const monthsDiff = (targetDate.getFullYear() - eventStartDate.getFullYear()) * 12 
-						+ (targetDate.getMonth() - eventStartDate.getMonth());
+					const monthsDiff = (targetParts.year - eventStartParts.year) * 12 
+						+ (targetParts.month - eventStartParts.month);
 					
 					return monthsDiff >= 0 && monthsDiff % interval === 0;
 				}
 
 				case RecurrenceFrequency.YEARLY: {
 					// Check that day and month match
-					if (targetDate.getDate() !== eventStartDate.getDate() || 
-						targetDate.getMonth() !== eventStartDate.getMonth()) {
+					if (targetParts.day !== eventStartParts.day || 
+						targetParts.month !== eventStartParts.month) {
 						return false;
 					}
 					
-					const yearsDiff = targetDate.getFullYear() - eventStartDate.getFullYear();
+					const yearsDiff = targetParts.year - eventStartParts.year;
 					return yearsDiff >= 0 && yearsDiff % interval === 0;
 				}
 
@@ -1496,6 +1603,12 @@ export class Caldav implements INodeType {
 					const calendarUrl = this.getNodeParameter('calendarUrl', i) as string;
 					const startDateValue = this.getNodeParameter('startDate', i) as string;
 					const endDateValue = this.getNodeParameter('endDate', i) as string;
+					const timezoneMode = this.getNodeParameter('timezoneMode', i, 'workflow') as string;
+					const effectiveTimezone = timezoneMode === 'custom'
+						? this.getNodeParameter('timezone', i) as string
+						: this.getTimezone();
+
+					validateTimezone(effectiveTimezone);
 
 					if (!startDateValue || !endDateValue) {
 						throw new NodeOperationError(
@@ -1505,7 +1618,7 @@ export class Caldav implements INodeType {
 						);
 					}
 
-					this.logger?.info(`[CalDAV GET] Getting events from ${startDateValue} to ${endDateValue} from calendar: ${calendarUrl}`);
+					this.logger?.info(`[CalDAV GET] Getting events from ${startDateValue} to ${endDateValue} in timezone ${effectiveTimezone} from calendar: ${calendarUrl}`);
 
 					// Create optimized authentication transport
 					const xhr = createOptimizedXhr(credentials);
@@ -1574,11 +1687,10 @@ export class Caldav implements INodeType {
 							);
 						}
 
-						const startDate = new Date(rangeStartDate);
-						startDate.setHours(0, 0, 0, 0);
-						
-						const endDate = new Date(rangeEndDate);
-						endDate.setHours(23, 59, 59, 999);
+						const rangeStartParts = getZonedParts(rangeStartDate, effectiveTimezone);
+						const rangeEndParts = getZonedParts(rangeEndDate, effectiveTimezone);
+						const startDate = zonedTimeToUtc({ ...rangeStartParts, hour: 0, minute: 0, second: 0 }, effectiveTimezone);
+						const endDate = zonedTimeToUtc({ ...rangeEndParts, hour: 23, minute: 59, second: 59 }, effectiveTimezone);
 
 						if (startDate > endDate) {
 							throw new NodeOperationError(
@@ -1588,7 +1700,11 @@ export class Caldav implements INodeType {
 							);
 						}
 
-						const rangeDates = getDatesInRange(startDate, endDate);
+						const rangeDateKeys = new Set(getDateRangeKeys(startDate, endDate, effectiveTimezone));
+						const rangeDates = Array.from(rangeDateKeys).map(dateKey => {
+							const [year, month, day] = dateKey.split('-').map(value => parseInt(value, 10));
+							return zonedTimeToUtc({ year, month, day, hour: 0, minute: 0, second: 0 }, effectiveTimezone);
+						});
 
 						// Synchronize calendar and get events
 						const syncedCalendar = await dav.syncCalendar(calendar, {
@@ -1648,14 +1764,14 @@ export class Caldav implements INodeType {
 									if (!match) continue;
 									
 									const dateStr = match[1];
-									const parsedDate = parseICalDate(dateStr, eventData);
+									const parsedDate = parseICalDate(dateStr, eventData, effectiveTimezone);
 									
 									if (!parsedDate) continue;
 									
 									const eventDate = parsedDate.date;
 									
 									// Check direct date range match
-									if (isDateInRange(eventDate, startDate, endDate)) {
+									if ((parsedDate.isAllDay && rangeDateKeys.has(getTimezoneDateKey(eventDate, effectiveTimezone))) || (!parsedDate.isAllDay && isDateInRange(eventDate, startDate, endDate))) {
 										eventsForRange.push({
 											...obj,
 											calendarData: eventData
@@ -1666,7 +1782,7 @@ export class Caldav implements INodeType {
 									// Check recurrence rules (RRULE)
 									const rruleMatch = eventData.match(/RRULE:([^\r\n]+)/);
 									const matchingRecurringDate = rruleMatch
-										? rangeDates.find(rangeDate => isRecurringEventOnDate(eventDate, rangeDate, rruleMatch[1], eventData))
+										? rangeDates.find(rangeDate => isRecurringEventOnDate(eventDate, rangeDate, rruleMatch[1], eventData, effectiveTimezone))
 										: undefined;
 
 									if (rruleMatch && matchingRecurringDate) {
@@ -1674,13 +1790,14 @@ export class Caldav implements INodeType {
 										// Also parse DTEND to calculate duration
 										const dtEndMatch = eventData.match(/DTEND[^:]*:(.+)/);
 										const dtEndStr = dtEndMatch ? dtEndMatch[1].trim() : '';
-										const parsedEndDate = dtEndStr ? parseICalDate(dtEndStr, eventData) : null;
+										const parsedEndDate = dtEndStr ? parseICalDate(dtEndStr, eventData, effectiveTimezone) : null;
 										
 										// Calculate actual dates for the target date
 										const { actualStartDate, actualEndDate } = calculateRecurringEventDates(
 											eventDate, 
 											parsedEndDate?.date || null, 
-											matchingRecurringDate
+											matchingRecurringDate,
+											effectiveTimezone
 										);
 										
 										// Create modified event data with actual dates
@@ -1690,7 +1807,7 @@ export class Caldav implements INodeType {
 										const originalDtStart = eventData.match(/DTSTART[^:]*:([^\r\n]+)/);
 										if (originalDtStart) {
 											const isUtcStart = parsedDate.isUtc;
-											const actualStartStr = formatDateToICal(actualStartDate, isUtcStart);
+											const actualStartStr = formatDateToICal(actualStartDate, isUtcStart, effectiveTimezone);
 											const startLine = originalDtStart[0];
 											const newStartLine = startLine.replace(originalDtStart[1], actualStartStr);
 											modifiedEventData = modifiedEventData.replace(startLine, newStartLine);
@@ -1699,7 +1816,7 @@ export class Caldav implements INodeType {
 										// Replace DTEND with the actual date if present
 										if (actualEndDate && dtEndMatch) {
 											const isUtcEnd = parsedEndDate?.isUtc || false;
-											const actualEndStr = formatDateToICal(actualEndDate, isUtcEnd);
+											const actualEndStr = formatDateToICal(actualEndDate, isUtcEnd, effectiveTimezone);
 											const endLine = dtEndMatch[0];
 											const newEndLine = endLine.replace(dtEndMatch[1], actualEndStr);
 											modifiedEventData = modifiedEventData.replace(endLine, newEndLine);
@@ -1739,8 +1856,8 @@ export class Caldav implements INodeType {
 							const dtStartRaw = dtStartMatch ? dtStartMatch[1].trim() : '';
 							const dtEndRaw = dtEndMatch ? dtEndMatch[1].trim() : '';
 							
-							const parsedStartDate = dtStartRaw ? parseICalDate(dtStartRaw, eventData) : null;
-							const parsedEndDate = dtEndRaw ? parseICalDate(dtEndRaw, eventData) : null;
+							const parsedStartDate = dtStartRaw ? parseICalDate(dtStartRaw, eventData, effectiveTimezone) : null;
+							const parsedEndDate = dtEndRaw ? parseICalDate(dtEndRaw, eventData, effectiveTimezone) : null;
 
 							const eventInfo = {
 								uid: uidMatch ? uidMatch[1].trim() : '',
@@ -1750,8 +1867,9 @@ export class Caldav implements INodeType {
 								webUrl: webUrlMatch ? webUrlMatch[1].trim() : '',
 								dtStart: dtStartRaw,
 								dtEnd: dtEndRaw,
-								dtStartISO: parsedStartDate ? toISOWithTimezone(parsedStartDate) : '',
-								dtEndISO: parsedEndDate ? toISOWithTimezone(parsedEndDate) : '',
+								dtStartISO: parsedStartDate ? toISOWithTimezone(parsedStartDate, effectiveTimezone) : '',
+								dtEndISO: parsedEndDate ? toISOWithTimezone(parsedEndDate, effectiveTimezone) : '',
+								timezone: effectiveTimezone,
 								url: event.url,
 								etag: event.etag,
 								calendarData: eventData,

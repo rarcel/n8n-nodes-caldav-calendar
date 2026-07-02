@@ -66,6 +66,7 @@ npm publish
 2. Select the created credentials.
 3. Select the calendar from the dropdown list.
 4. Choose the start and end dates for retrieving events.
-5. Run the workflow.
+5. Use the workflow timezone or specify a custom IANA timezone for returned `dtStartISO` and `dtEndISO` values.
+6. Run the workflow.
 
 The node returns an array of events with fields such as `uid`, `summary`, `description`, `dtStart`, `dtEnd`, `url`, `etag`, and `calendarData`.
